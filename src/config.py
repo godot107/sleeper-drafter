@@ -1,0 +1,80 @@
+"""Single place to read configuration, so the CLI, tests, and any future
+scheduler all behave identically.
+
+Mirrors the orchestrator-agnostic ``Settings`` pattern from
+``energy-batch-trader`` and ``financial-forecasting-engine``.
+
+No API keys are required to run: every Sleeper endpoint this project touches is
+public and unauthenticated. The env vars below only override defaults.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:  # pragma: no cover - optional dependency
+    pass
+
+_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _env(name: str, default: str | None = None) -> str | None:
+    value = os.getenv(name)
+    return value if value not in (None, "") else default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = _env(name)
+    return float(raw) if raw is not None else default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = _env(name)
+    return int(raw) if raw is not None else default
+
+
+@dataclass
+class Settings:
+    """Paths, API behaviour, and every tunable coefficient in the model."""
+
+    # --- Paths (repo-relative, so runs work from any cwd) ---
+    root: Path = _ROOT
+    data_dir: Path = field(default_factory=lambda: _ROOT / "data")
+    cache_dir: Path = field(default_factory=lambda: _ROOT / "data" / "cache")
+    players_cache: Path = field(default_factory=lambda: _ROOT / "data" / "cache" / "players.json")
+    projections_csv: Path = field(default_factory=lambda: _ROOT / "data" / "projections.csv")
+
+    # --- Season ---
+    season: str = field(default_factory=lambda: _env("SLEEPER_SEASON", "2026"))
+
+    # --- API behaviour ---
+    # api.sleeper.com returns 403 to the default "Python-urllib/3.x" UA, so an
+    # explicit User-Agent is mandatory, not cosmetic.
+    user_agent: str = "sleeper-drafter/0.1 (+https://github.com/godot107/sleeper-drafter)"
+    poll_interval_s: float = field(default_factory=lambda: _env_float("POLL_INTERVAL_S", 1.5))
+    request_timeout_s: float = field(default_factory=lambda: _env_float("REQUEST_TIMEOUT_S", 10.0))
+    max_retries: int = field(default_factory=lambda: _env_int("MAX_RETRIES", 4))
+    players_max_age_h: int = 24  # docs: call /players/nfl "not more than once per day"
+
+    # --- Opponent model ---
+    adp_sigma: float = field(default_factory=lambda: _env_float("ADP_SIGMA", 8.0))
+    urgency_min: float = 0.10          # floor for any unfilled position
+    urgency_filled: float = 0.05       # starters already filled -> bench-only interest
+
+    # --- Optimizer ---
+    denial_lambda: float = field(default_factory=lambda: _env_float("DENIAL_LAMBDA", 0.25))
+    tier_cliff_pts: float = field(default_factory=lambda: _env_float("TIER_CLIFF_PTS", 30.0))
+    run_warning_opponents: int = 2     # >=N high-urgency opponents at one position
+    kdef_gate_from_end: int = 2        # block K/DEF until the last N rounds
+
+    # --- Undrafted sentinel used by Sleeper's projections payload ---
+    undrafted_adp: float = 999.0
+
+
+settings = Settings()
