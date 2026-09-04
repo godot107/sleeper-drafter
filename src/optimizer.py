@@ -188,4 +188,118 @@ def rank_with_lookahead(
     ranked = rank_static(available, team, state.schema, round_no)
     # survival_probabilities preserves row order, so align on the sorted frame.
     ranked["survival"] = survival_probabilities(state, ranked, window)
-    return ranked, window
+
+    ranked = add_vona(ranked)
+    ranked["denial"] = denial_value(state, ranked, window)
+
+    # Score(X) = VONA + denial + roster fit. VORP stays as a visible sanity
+    # column: VONA answers "take him now or later", VORP "is he any good".
+    ranked["score"] = ranked["vona"] + ranked["denial"] + ranked["roster_fit"]
+    return ranked.sort_values("score", ascending=False).reset_index(drop=True), window
+
+
+def expected_best_available(
+    points: np.ndarray,
+    survival: np.ndarray,
+    replacement: float,
+) -> np.ndarray:
+    """E[best player at this position at my next pick], excluding each candidate.
+
+    ``points`` must be sorted descending; ``survival`` aligned to it.
+
+    The spec's formula summed over the whole ranked pool, which has two
+    problems. It leaves probability mass unaccounted for when *nobody*
+    survives, and it includes the candidate himself -- but if you draft X, X is
+    precisely who will not be there next time. Excluding X matters most for the
+    best player at a position, where it is the difference between "take him
+    now" and "he's the same guy you'd get later".
+
+    Both are handled by a forward/backward pass rather than the O(n^2) rebuild:
+
+        F[i] = s[i]*p[i] + (1-s[i])*F[i+1]      value of the pool from i on,
+               F[n] = replacement                falling back to replacement
+        G[i] = prod_{l<i} (1-s[l])              all better players gone
+        H[i] = sum_{l<i} s[l]*p[l]*G[l]         value if one of them survives
+
+        E_excluding_i = H[i] + G[i] * F[i+1]
+
+    which is exact and linear.
+    """
+    n = points.size
+    if n == 0:
+        return np.zeros(0)
+
+    # Backward: expected best from i onward, replacement if none survive.
+    forward = np.empty(n + 1, dtype=float)
+    forward[n] = replacement
+    for i in range(n - 1, -1, -1):
+        forward[i] = survival[i] * points[i] + (1.0 - survival[i]) * forward[i + 1]
+
+    # Forward: probability every better player is gone, and the value if not.
+    gone = np.empty(n, dtype=float)
+    value_if_earlier_survives = np.empty(n, dtype=float)
+    gone[0] = 1.0
+    value_if_earlier_survives[0] = 0.0
+    for i in range(1, n):
+        gone[i] = gone[i - 1] * (1.0 - survival[i - 1])
+        value_if_earlier_survives[i] = (
+            value_if_earlier_survives[i - 1]
+            + survival[i - 1] * points[i - 1] * gone[i - 1]
+        )
+
+    return value_if_earlier_survives + gone * forward[1:]
+
+
+def add_vona(board: pd.DataFrame) -> pd.DataFrame:
+    """Add ``vona`` = projected points minus expected best available next turn.
+
+    Requires ``survival`` and ``replacement_pts`` columns.
+    """
+    out = board.copy()
+    out["vona"] = np.nan
+
+    for pos, group in out.groupby("pos"):
+        ordered = group.sort_values("proj_pts", ascending=False)
+        points = ordered["proj_pts"].to_numpy(dtype=float)
+        survival = ordered["survival"].to_numpy(dtype=float)
+        replacement = float(ordered["replacement_pts"].iloc[0])
+        expected = expected_best_available(points, survival, replacement)
+        out.loc[ordered.index, "vona"] = points - expected
+
+    return out
+
+
+def denial_value(
+    state: DraftState,
+    board: pd.DataFrame,
+    window: list[int],
+    *,
+    lam: float | None = None,
+) -> np.ndarray:
+    """Expected value taken away from opponents by drafting each candidate.
+
+    For every upcoming opponent pick, the chance they take X times what X would
+    be worth *to them* over their own replacement at that position. Summed and
+    scaled by lambda.
+
+    Deliberately conservative. Petersen (Ch.7) warns against joining a run
+    mid-stream, which is exactly what an aggressive denial term encourages, so
+    lambda stays low and denial can nudge between comparable players rather
+    than override value.
+    """
+    lam = settings.denial_lambda if lam is None else lam
+    if board.empty or not window:
+        return np.zeros(len(board))
+
+    from .opponent_model import selection_probs
+
+    points = board["proj_pts"].to_numpy(dtype=float)
+    replacement = board["replacement_pts"].to_numpy(dtype=float)
+    gain_to_them = np.clip(points - replacement, 0, None)
+
+    denied = np.zeros(len(board), dtype=float)
+    for pick_no in window:
+        team = state.team_at(pick_no)
+        denied += selection_probs(board, team, state.schema, pick_no) * gain_to_them
+
+    return lam * denied
