@@ -63,9 +63,21 @@ class Settings:
     players_max_age_h: int = 24  # docs: call /players/nfl "not more than once per day"
 
     # --- Opponent model ---
+    # σ grows with pick number: round 1 is predictable, round 10 is not.
     adp_sigma: float = field(default_factory=lambda: _env_float("ADP_SIGMA", 8.0))
+    adp_sigma_frac: float = field(default_factory=lambda: _env_float("ADP_SIGMA_FRAC", 0.35))
+    adp_sigma_min: float = field(default_factory=lambda: _env_float("ADP_SIGMA_MIN", 2.5))
+    consideration_set: int = 24    # how many players an opponent realistically weighs
     urgency_min: float = 0.10          # floor for any unfilled position
     urgency_filled: float = 0.05       # starters already filled -> bench-only interest
+
+    # --- Optimizer: roster fit (projected-point units, so they are
+    # commensurate with VORP) ---
+    starter_bonus: float = 12.0    # fills an unfilled dedicated starting slot
+    flex_bonus: float = 6.0        # fills FLEX / SUPER_FLEX
+    depth_penalty: float = 18.0    # per body past what you can start, scaled by round
+    risk_weight: float = 4.0       # Petersen Ch.6 steady/volatile nudge
+    depth_penalty_floor: float = 0.35  # keep depth costly even in the last round
 
     # --- Optimizer ---
     denial_lambda: float = field(default_factory=lambda: _env_float("DENIAL_LAMBDA", 0.25))
