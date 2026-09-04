@@ -184,3 +184,22 @@ class SleeperClient:
         return self._get_json(
             f"{API_V1}/user/{user_id}/drafts/nfl/{season or settings.season}"
         )
+
+    # ------------------------------------------------------------ historical
+
+    def weekly_stats(self, position: str, season: str, week: int) -> list[dict]:
+        """Actual (not projected) fantasy points for one position in one week.
+
+        Used to compute Petersen's consistency measures -- the coefficient of
+        variation of a player's weekly points (Fantasy Football Analytics,
+        Eq. 6.1). Sleeper's projections carry no uncertainty estimate, so
+        week-to-week variance in the prior season is our stand-in.
+        """
+        return self._get_json(
+            f"{API_PROJECTIONS}/stats/nfl/{season}/{week}",
+            params={
+                "season_type": "regular",
+                "position[]": position,
+                "order_by": "pts_ppr",
+            },
+        )
