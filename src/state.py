@@ -119,15 +119,36 @@ class RosterSchema:
     def is_superflex(self) -> bool:
         return self.flex.get("SUPER_FLEX", 0) > 0
 
-    def flex_capacity(self, pos: str) -> int:
-        """How many flex slots this position is eligible to fill."""
+    def flex_capacity(self, pos: str) -> float:
+        """This position's *share* of the flex slots it is eligible for.
+
+        Shared, not counted in full. A single FLEX slot is one slot in the
+        league, but RB, WR and TE are all eligible for it; giving each the whole
+        slot triple-counts it and pushes every replacement baseline too deep.
+
+        That bit hardest at tight end, whose pool is shallow: with the slot
+        counted in full, TE's baseline was drawn from TE25-36 (81.5 pts) in a
+        league where about thirteen tight ends start. Every tight end therefore
+        looked ~30 points more valuable than he was, and across ten mock drafts
+        the engine rostered a mean of 3.5 of them for one starting slot.
+
+        Splitting each flex slot evenly across its eligible positions is the
+        simple correction: league-wide those slots do get filled by some mix of
+        the eligible positions, and absent evidence about the mix, even shares
+        are the honest default.
+        """
         return sum(
-            n for name, n in self.flex.items()
+            n / len(FLEX_ELIGIBILITY[name])
+            for name, n in self.flex.items()
             if pos in FLEX_ELIGIBILITY.get(name, frozenset())
         )
 
-    def total_starters(self, pos: str) -> int:
-        """Dedicated + flex-eligible starting slots. The denominator in urgency."""
+    def total_starters(self, pos: str) -> float:
+        """Dedicated slots plus this position's *share* of the flex slots.
+
+        Fractional by design -- see :meth:`flex_capacity`. It is the denominator
+        in urgency and the multiplier that sets each position's VORP baseline.
+        """
         return self.starters.get(pos, 0) + self.flex_capacity(pos)
 
     @classmethod

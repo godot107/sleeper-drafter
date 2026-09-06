@@ -96,6 +96,30 @@ def poll_delay(picks_until_turn: int, my_turn: bool) -> float:
 
 # ----------------------------------------------------------------- subcommands
 
+def fetch_league(client: SleeperClient, draft: dict, *, quiet: bool = False):
+    """Return the league object for a draft, or None.
+
+    A league mock leaves the draft's top-level ``league_id`` null but still
+    carries one under ``metadata.league_id`` -- and that league *is* fetchable,
+    with the authoritative ``roster_positions`` array. Checking only the
+    top-level field sent us down the ``slots_*`` fallback for no reason, which
+    cannot see SUPER_FLEX and has to guess the bench.
+    """
+    league_id = draft.get("league_id") or (draft.get("metadata") or {}).get("league_id")
+    if not league_id:
+        return None
+    try:
+        league = client.league(league_id)
+    except SleeperError as exc:
+        if not quiet:
+            console.print(f"[yellow]League {league_id} unavailable ({exc}); "
+                          f"falling back to draft slot settings.[/]")
+        return None
+    if not quiet:
+        console.print(f"[dim]roster schema from league {league_id}[/]")
+    return league
+
+
 def cmd_find_draft(username: str, season: str) -> int:
     client = SleeperClient()
     try:
@@ -198,12 +222,7 @@ def cmd_replay(draft_id: str, slot: int | None, log: Path) -> int:
         console.print("[yellow]That draft has no picks yet.[/]")
         return 1
 
-    league = None
-    if draft.get("league_id"):
-        try:
-            league = client.league(draft["league_id"])
-        except SleeperError:
-            pass
+    league = fetch_league(client, draft, quiet=True)
 
     state = DraftState(draft, proj, league=league)
     board = make_board(state, proj, cons)
@@ -293,13 +312,7 @@ def cmd_web(draft_id: str | None, slot: int, port: int, host: str,
         except NotFound:
             console.print(f"[bold red]No draft '{draft_id}'.[/]")
             return 1
-        league = None
-        if draft.get("league_id"):
-            try:
-                league = client.league(draft["league_id"])
-            except SleeperError as exc:
-                console.print(f"[yellow]League unavailable ({exc}); "
-                              f"falling back to draft slot settings.[/]")
+        league = fetch_league(client, draft)
         state = DraftState(draft, proj, league=league,
                            traded_picks=client.traded_picks(draft_id))
         board = make_board(state, proj, cons)
@@ -330,14 +343,7 @@ def cmd_live(draft_id: str, slot: int | None, top_n: int) -> int:
         console.print(f"[bold red]No draft '{draft_id}'.[/]")
         return 1
 
-    league = None
-    if draft.get("league_id"):
-        try:
-            league = client.league(draft["league_id"])
-        except SleeperError as exc:
-            # Costs us SUPER_FLEX detection, so say so rather than silently degrade.
-            console.print(f"[yellow]League unavailable ({exc}); "
-                          f"falling back to draft slot settings.[/]")
+    league = fetch_league(client, draft)
 
     state = DraftState(draft, proj, league=league,
                        traded_picks=client.traded_picks(draft_id))

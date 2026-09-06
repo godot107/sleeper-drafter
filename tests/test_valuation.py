@@ -136,3 +136,61 @@ class TestBuildBoard:
     def test_sorted_by_vorp(self, board):
         out = build_board(board, {"RB": 2, "WR": 2}, teams=2)
         assert out["vorp"].is_monotonic_decreasing
+
+
+class TestSharedFlexCapacity:
+    """One FLEX slot is one slot, not one per eligible position.
+
+    Counting it in full for RB, WR and TE alike pushed every VORP baseline too
+    deep. It bit hardest at tight end, whose pool is shallow: the baseline came
+    from TE25-36 in a league where ~13 tight ends start, so every TE looked
+    ~30 points better than he was. Across ten mock drafts the engine rostered a
+    mean of 3.5 tight ends for a single starting slot.
+    """
+
+    def _schema(self, flex):
+        from src.state import RosterSchema
+        return RosterSchema(
+            teams=12, rounds=15,
+            starters={"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 1, "DEF": 1},
+            flex=flex, bench=6,
+        )
+
+    def test_one_flex_slot_is_split_across_eligible_positions(self):
+        schema = self._schema({"FLEX": 1})
+        # FLEX takes RB/WR/TE -> a third each, not a whole slot each.
+        assert schema.flex_capacity("RB") == pytest.approx(1 / 3)
+        assert schema.flex_capacity("TE") == pytest.approx(1 / 3)
+        assert schema.flex_capacity("QB") == 0.0
+
+    def test_capacity_never_exceeds_the_slots_that_exist(self):
+        schema = self._schema({"FLEX": 2})
+        total = sum(schema.flex_capacity(p) for p in ("RB", "WR", "TE"))
+        assert total == pytest.approx(2.0), "must sum to the number of real slots"
+
+    def test_superflex_includes_quarterbacks(self):
+        schema = self._schema({"SUPER_FLEX": 1})
+        assert schema.flex_capacity("QB") == pytest.approx(1 / 4)
+        assert sum(schema.flex_capacity(p) for p in ("QB", "RB", "WR", "TE")) \
+            == pytest.approx(1.0)
+
+    def test_tight_end_baseline_is_not_pushed_absurdly_deep(self):
+        schema = self._schema({"FLEX": 1})
+        # 12 teams x total_starters(TE) should land near the real starter count
+        # (~13), not out at TE24.
+        assert 12 * schema.total_starters("TE") < 18
+
+    def test_replacement_rises_when_flex_is_shared(self):
+        rows = []
+        for pos, base, n in [("RB", 300, 60), ("WR", 280, 60), ("TE", 200, 40)]:
+            for i in range(n):
+                rows.append({"player_id": f"{pos}{i}", "name": f"{pos}{i}", "pos": pos,
+                             "team": "X", "proj_pts": float(base - i * 5),
+                             "adp": float(i + 1)})
+        frame = pd.DataFrame(rows)
+        shared = self._schema({"FLEX": 1})
+        full = {"RB": 3.0, "WR": 3.0, "TE": 2.0}          # the old, triple-counted view
+        lv_shared = replacement_levels(
+            frame, {p: shared.total_starters(p) for p in ("RB", "WR", "TE")}, 12)
+        lv_full = replacement_levels(frame, full, 12)
+        assert lv_shared["TE"] > lv_full["TE"], "sharing must lift the TE baseline"
