@@ -11,8 +11,13 @@ __pycache__/
 .ipynb_checkpoints/
 
 # --- Regenerable data artifacts ---
+# All of data/ is rebuilt by scripts/fetch_*.py and main.py --export-cheatsheet.
+# Keeping derived boards out of git also stops a stale 2026 snapshot from being
+# mistaken for this season's numbers.
 data/cache/
 data/projections.csv
+data/consistency.csv
+data/cheatsheet.csv
 
 # --- Local tooling ---
 .claude/settings.local.json
