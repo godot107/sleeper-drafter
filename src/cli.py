@@ -69,7 +69,7 @@ def recommendations_table(ranked: pd.DataFrame, top_n: int = 10) -> Table:
         ("#", "right"), ("Player", "left"), ("Pos", "left"), ("Tm", "left"),
         ("Proj", "right"), ("ADP", "right"), ("Tier", "right"),
         ("Surv%", "right"), ("VORP", "right"), ("VONA", "right"),
-        ("Score", "right"), ("Role", "left"), ("Risk", "left"),
+        ("Lineup+", "right"), ("Score", "right"), ("Role", "left"), ("Risk", "left"),
     ]:
         table.add_column(col, justify=justify, no_wrap=True)
 
@@ -87,6 +87,8 @@ def recommendations_table(ranked: pd.DataFrame, top_n: int = 10) -> Table:
             "—" if surv is None or surv != surv else f"{surv * 100:.0f}",
             f"{row['vorp']:.0f}",
             "—" if vona is None or vona != vona else f"{vona:.0f}",
+            Text(f"{row.get('lineup_value', 0):+.0f}",
+                 style="green" if row.get("lineup_value", 0) > 1 else "dim"),
             Text(f"{row['score']:.0f}", style="bold"),
             Text(str(row.get("role", "")), style=ROLE_STYLE.get(row.get("role"), "")),
             Text(str(row.get("risk", "")), style=RISK_STYLE.get(row.get("risk"), "")),

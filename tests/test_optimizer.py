@@ -438,3 +438,67 @@ class TestRosterCapsAndExclusions:
     def test_missing_exclusion_file_is_fine(self, tmp_path):
         from src.valuation import load_do_not_draft
         assert load_do_not_draft(tmp_path / "nope.txt") == set()
+
+
+class TestMarginalLineupValue:
+    """The column that is shown but deliberately not ranked on.
+
+    Ranking by it loses: A/B'd over 16 drafts at slots 1, 6 and 12 across VONA
+    weights 0.5 to 3.0, it was worse at every setting (-7.2 best, -11.2 worst).
+    Marginal lineup value is greedy -- fill the empty slot now -- when the right
+    play is often to take the scarce player and fill that slot later from a
+    deeper pool, which is what VONA prices.
+    """
+
+    @pytest.fixture
+    def schema(self):
+        return RosterSchema(
+            teams=12, rounds=15,
+            starters={"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 1, "DEF": 1},
+            flex={"FLEX": 1}, bench=6,
+        )
+
+    @pytest.fixture
+    def frame(self):
+        return pd.DataFrame([
+            {"player_id": "wr", "name": "WR", "pos": "WR", "team": "X",
+             "proj_pts": 187.0, "adp": 60.0, "vorp": 40.0, "risk": "steady"},
+            {"player_id": "rb", "name": "RB", "pos": "RB", "team": "X",
+             "proj_pts": 159.0, "adp": 59.0, "vorp": 20.0, "risk": "steady"},
+        ])
+
+    REPLACEMENT = {"QB": 277.0, "RB": 137.0, "WR": 149.0, "TE": 111.0,
+                   "K": 100.0, "DEF": 84.0}
+
+    def test_an_empty_dedicated_slot_pays_the_full_surplus(self, frame, schema):
+        from src.optimizer import marginal_lineup_value
+        team = Team(1, 1, slot_counts={"QB": 1, "RB": 2, "TE": 1})
+        value = marginal_lineup_value(frame, team, schema, self.REPLACEMENT)
+        # WR slots empty -> 187 - WR replacement 149
+        assert value[0] == pytest.approx(38.0)
+
+    def test_flex_baseline_only_uses_this_league_s_flex_types(self, frame, schema):
+        """SUPER_FLEX must not drag quarterbacks into a plain FLEX baseline.
+
+        It did, and a ~277-point QB replacement swamped everything, so every
+        back and receiver scored a marginal value of zero.
+        """
+        from src.optimizer import marginal_lineup_value
+        team = Team(1, 1, slot_counts={"QB": 1, "RB": 2, "WR": 2, "TE": 1})
+        value = marginal_lineup_value(frame, team, schema, self.REPLACEMENT)
+        # Only the flex is open; baseline is the best of RB/WR/TE replacement (149).
+        assert value[0] == pytest.approx(38.0)
+        assert value[1] == pytest.approx(10.0)
+
+    def test_never_negative(self, frame, schema):
+        from src.optimizer import marginal_lineup_value
+        full = Team(1, 1, slot_counts={"QB": 1, "RB": 3, "WR": 3, "TE": 1,
+                                       "K": 1, "DEF": 1})
+        assert (marginal_lineup_value(frame, full, schema, self.REPLACEMENT) >= 0).all()
+
+    def test_score_is_still_vona_based(self):
+        """Guards the A/B result: the ranking must not silently switch."""
+        import inspect
+        from src import optimizer
+        src = inspect.getsource(optimizer.rank_with_lookahead)
+        assert 'ranked["score"] = ranked["vona"] + ranked["denial"] + ranked["roster_fit"]' in src

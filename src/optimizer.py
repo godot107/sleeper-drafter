@@ -46,7 +46,7 @@ import numpy as np
 import pandas as pd
 
 from .config import settings
-from .state import DraftState, Team, RosterSchema
+from .state import FLEX_ELIGIBILITY, DraftState, RosterSchema, Team
 
 logger = logging.getLogger(__name__)
 
@@ -265,6 +265,27 @@ def rank_with_lookahead(
     ranked = add_vona(ranked)
     ranked["denial"] = denial_value(state, ranked, window)
 
+    # What he would actually add to your starting lineup today. Shown, not
+    # scored on.
+    #
+    # Ranking by this instead of VONA is the obvious-looking fix and it is
+    # wrong. A/B tested over 16 drafts at slots 1, 6 and 12, across VONA weights
+    # from 0.5 to 3.0, it lost at every setting -- best case -7.2 starting
+    # points, worst -11.2. The reason is that marginal lineup value is greedy:
+    # it says fill the empty slot now, when the right play is often to take the
+    # scarce player and fill that slot two rounds later from a deeper pool.
+    # VONA already prices that, which is the whole point of it.
+    #
+    # Where the two genuinely disagreed in a live draft -- a redundant tight end
+    # scoring above a receiver who filled an empty slot -- the fault was in
+    # roster_fit, and roster caps and the flex-hole fix addressed it directly.
+    # What remains is VONA being right about scarcity.
+    replacement = (
+        ranked.groupby("pos")["replacement_pts"].first().to_dict()
+        if "replacement_pts" in ranked.columns else {}
+    )
+    ranked["lineup_value"] = marginal_lineup_value(ranked, team, state.schema, replacement)
+
     # Score(X) = VONA + denial + roster fit. VORP stays as a visible sanity
     # column: VONA answers "take him now or later", VORP "is he any good".
     ranked["score"] = ranked["vona"] + ranked["denial"] + ranked["roster_fit"]
@@ -446,3 +467,69 @@ def positional_outlook(
     if frame.empty:
         return frame
     return frame.sort_values("expected_loss", ascending=False).reset_index(drop=True)
+
+
+def slot_baselines(
+    team: Team,
+    schema: RosterSchema,
+    replacement: dict[str, float],
+    current_starters: dict[str, list[float]] | None = None,
+) -> dict[str, float]:
+    """Per position: the points a new body there would actually displace.
+
+    Marginal lineup value is ``max(0, his points - this baseline)``. Computing
+    it per *position* rather than per player keeps it O(6) instead of one
+    lineup solve per candidate, which matters inside a 200ms budget.
+
+    Three cases:
+
+    * an empty dedicated slot -- he displaces the replacement you would stream;
+    * an empty flex -- he displaces the best replacement among eligible
+      positions, since that is who would otherwise occupy it;
+    * no empty slot -- he displaces your current worst starter at any slot he
+      could take, and is worth nothing unless he beats that player.
+    """
+    roles = slot_a_body_fills(team, schema)
+
+    # Only the flex slots this league actually has. Unioning every flex type
+    # pulled SUPER_FLEX in even where the league has none, which dragged
+    # quarterbacks into the baseline -- and a QB replacement of ~277 points
+    # swamped it, so every running back and receiver scored a marginal value of
+    # zero.
+    flex_eligible: set[str] = set()
+    for name, count in (schema.flex or {}).items():
+        if count:
+            flex_eligible |= FLEX_ELIGIBILITY.get(name, frozenset())
+    flex_replacement = max(
+        (replacement.get(p, 0.0) for p in flex_eligible), default=0.0
+    )
+
+    baselines: dict[str, float] = {}
+    for pos in FANTASY_POSITIONS:
+        role = roles.get(pos, "depth")
+        if role == "starter":
+            baselines[pos] = replacement.get(pos, 0.0)
+        elif role == "flex":
+            baselines[pos] = flex_replacement
+        else:
+            # Depth: he only helps by beating someone already starting. Without
+            # the current lineup to hand, fall back to the strongest baseline in
+            # play, which makes depth worth ~nothing -- correct, and the whole
+            # reason a fourth running back should not outrank an empty slot.
+            worst = (current_starters or {}).get(pos)
+            baselines[pos] = min(worst) if worst else max(
+                replacement.get(pos, 0.0), flex_replacement
+            )
+    return baselines
+
+
+def marginal_lineup_value(
+    board: pd.DataFrame,
+    team: Team,
+    schema: RosterSchema,
+    replacement: dict[str, float],
+) -> np.ndarray:
+    """Points each candidate would actually add to the starting lineup."""
+    baselines = slot_baselines(team, schema, replacement)
+    base = np.array([baselines.get(p, 0.0) for p in board["pos"].to_numpy()], dtype=float)
+    return np.clip(board["proj_pts"].to_numpy(dtype=float) - base, 0.0, None)

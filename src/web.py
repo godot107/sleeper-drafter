@@ -496,14 +496,15 @@ def create_app(publisher: Publisher) -> Dash:
             {"name": "Tm", "id": "team"}, {"name": "Proj", "id": "proj_pts"},
             {"name": "ADP", "id": "adp"}, {"name": "Tier", "id": "tier"},
             {"name": "Surv%", "id": "surv"}, {"name": "VORP", "id": "vorp"},
-            {"name": "VONA", "id": "vona"}, {"name": "Score", "id": "score"},
+            {"name": "VONA", "id": "vona"}, {"name": "Lineup+", "id": "lineup_value"},
+            {"name": "Score", "id": "score"},
             {"name": "Role", "id": "role"}, {"name": "Ceil%", "id": "ceil"},
             {"name": "Risk", "id": "risk"},
         ]
         table = view.head(60).copy()
         if not table.empty:
             table["surv"] = (table["survival"] * 100).round(0)
-            for col in ("proj_pts", "vorp", "vona", "score"):
+            for col in ("proj_pts", "vorp", "vona", "score", "lineup_value"):
                 table[col] = table[col].round(0)
             table["adp"] = table["adp"].round(1)
             table["role"] = table.get("role", "")
