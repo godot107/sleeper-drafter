@@ -159,6 +159,24 @@ def roster_fit(
         fit[starting & (risk == "volatile")] -= risk_weight
         fit[is_depth & (risk == "volatile")] += risk_weight
 
+    # Personal do-not-draft list -- a judgement channel the projections lack.
+    if "excluded" in board.columns:
+        fit[board["excluded"].to_numpy(dtype=bool)] = HARD_BLOCK
+
+    # Roster caps. Once you hold as many of a position as you will ever start,
+    # more are blocked outright rather than merely penalised.
+    #
+    # The depth penalty alone was not enough. Replaying a finished draft, the
+    # engine asked for a *third* tight end at three separate picks behind a
+    # starter it already had, plus a backup quarterback at two more -- five
+    # bench picks on positions that stream freely off waivers. The reason is
+    # structural: once every slot is filled, a bench body adds nothing to the
+    # lineup, so ranking falls back on VONA, and VONA is largest exactly where
+    # the pool is shallowest. Shallow is why you should not spend the pick.
+    for capped_pos, cap in (settings.roster_caps or {}).items():
+        if team.slot_counts.get(capped_pos, 0) >= cap:
+            fit[positions == capped_pos] = HARD_BLOCK
+
     # K/DEF have the lowest measured dropoff, so waiting costs nothing.
     gate_round = schema.rounds - settings.kdef_gate_from_end
     if round_no <= gate_round:

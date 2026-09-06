@@ -96,6 +96,20 @@ class Settings:
     run_warning_opponents: int = 2     # >=N high-urgency opponents at one position
     kdef_gate_from_end: int = 2        # block K/DEF until the last N rounds
 
+    # --- Roster caps: how many of a position you will ever roster ---
+    # Willie's rule after three mock drafts: finish with one QB, one TE, one K
+    # and one DEF, and spend every other pick on RB/WR. All four are streamable
+    # off waivers, and the engine kept wanting a backup at each because a
+    # shallow position has a steep VONA even when the slot is already filled.
+    # Once a cap is hit the position is blocked outright.
+    roster_caps: dict = field(default_factory=lambda: {
+        "QB": 1, "TE": 1, "K": 1, "DEF": 1,
+    })
+
+    # --- Personal exclusions ---
+    do_not_draft_path: Path = field(
+        default_factory=lambda: _ROOT / "data" / "do_not_draft.txt")
+
     # --- Undrafted sentinel used by Sleeper's projections payload ---
     undrafted_adp: float = 999.0
 

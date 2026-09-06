@@ -94,6 +94,20 @@ Analytics*](https://isaactpetersen.github.io/Fantasy-Football-Analytics-Textbook
 | **K/DEF late** | §7.4.1 | Kickers and defenses have the lowest measured dropoff, so waiting costs nothing. |
 | **Runs** | Ch. 7 | "Avoid joining a run mid-stream" — why the denial coefficient stays low. |
 
+## Tuning it to how you draft
+
+Two things the projections cannot know:
+
+**`data/do_not_draft.txt`** — one name per line, `#` comments allowed. Injury history, a
+holdout, a player you have simply seen enough of. Excluded players are blocked from
+recommendations but stay on the board, so the pick feed still names them when someone else
+takes them.
+
+**`roster_caps` in `src/config.py`** — how many of a position you will ever roster.
+Defaults to one each of QB, TE, K and DEF, on the reasoning that all four stream off
+waivers and every other pick is better spent on RB/WR. Raise or remove them for a
+superflex or TE-premium league.
+
 ## Known limitations
 
 Stated plainly, because they affect how much to trust a given number.

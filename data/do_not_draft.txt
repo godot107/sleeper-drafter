@@ -1,0 +1,9 @@
+# Players to exclude from every recommendation, one per line.
+# Case-insensitive match on the player's full name; blank lines and # comments ignored.
+#
+# This is a judgement channel the model does not have. Projections carry no view
+# on injury history, holdouts, coaching changes or anything you have simply seen
+# enough of -- so rather than argue with the numbers each time a name comes up,
+# take the player off the board and let the ranking work on what is left.
+
+Deebo Samuel        # injury history

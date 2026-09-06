@@ -48,7 +48,9 @@ pytest -q                                      # 124 tests
 - `src/replay.py` — scores survival predictions against a completed draft; appends to a
   calibration log so evidence accumulates across drafts.
 - `scripts/` — the two data builders. Both write frozen CSV snapshots.
-- `data/` — generated artifacts; all gitignored, all rebuildable.
+- `data/do_not_draft.txt` — personal exclusions, one name per line. **Committed**, unlike
+  the rest of `data/`: it is a judgement, not a generated artifact.
+- `data/` — everything else is generated, gitignored and rebuildable.
 
 ## Key decisions / constraints
 
@@ -75,6 +77,13 @@ pytest -q                                      # 124 tests
   should stream QB rather than draft QB25 — but a roster that cannot fill its QB slot scores
   zero there. When picks remaining ≤ mandatory slots unfilled, the pool is restricted.
   Opponents obey the same rule, because real managers do.
+- **Roster caps (`config.roster_caps`, default one each of QB/TE/K/DEF).** All four stream
+  freely off waivers. Without a cap the engine kept asking for backups at them, because
+  once every slot is filled a bench body adds nothing to the lineup, ranking falls back on
+  VONA, and VONA is largest exactly where the pool is shallowest. Shallow is the reason not
+  to spend the pick.
+- **Do-not-draft list is a hard block, not a filter.** Excluded players stay on the board so
+  the picks feed and `--replay` can still name them; someone else drafts them.
 - **Denial stays weak (λ=0.25, window-scoped).** Petersen Ch.7 warns against joining a run
   mid-stream, which aggressive denial encourages.
 - **Recompute budget is 200ms.** Currently 13ms mean / 23ms max.

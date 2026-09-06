@@ -30,6 +30,7 @@ the bench, where the upside is worth more than the downside costs.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -265,6 +266,8 @@ def build_board(
                     len(unknown), ", ".join(sorted(unknown)))
         projections = projections[projections["pos"].isin(rosterable)]
 
+    projections = apply_exclusions(projections)
+
     board = add_vorp(projections, starters_by_pos, teams)
     board = add_dropoff(board)
     board = assign_tiers(board)
@@ -341,4 +344,46 @@ def add_ceiling(frame: pd.DataFrame, consistency: pd.DataFrame | None) -> pd.Dat
     # score more, so an unranked list is just a list of quarterbacks. Rank it
     # within position, the same way opportunity is scaled.
     out["ceiling_pct"] = out.groupby("pos")["ceiling"].rank(pct=True)
+    return out
+
+
+# ------------------------------------------------------------ exclusions
+
+def load_do_not_draft(path=None) -> set[str]:
+    """Names to keep off the board entirely, lower-cased.
+
+    A judgement channel the model does not have. Projections say nothing about
+    injury history, a holdout, or a player you have simply seen enough of, and
+    arguing with the numbers every time the name resurfaces is worse than
+    removing him once.
+    """
+    from .config import settings
+
+    path = Path(path or settings.do_not_draft_path)
+    if not path.exists():
+        return set()
+    names = set()
+    for line in path.read_text().splitlines():
+        line = line.split("#")[0].strip()
+        if line:
+            names.add(line.lower())
+    return names
+
+
+def apply_exclusions(frame: pd.DataFrame, excluded: set[str] | None = None) -> pd.DataFrame:
+    """Flag excluded players rather than removing them.
+
+    They are hard-blocked from recommendations in the optimizer, but stay on the
+    board so the picks feed and ``--replay`` can still name them -- someone else
+    will draft them, and a row of raw player ids is not a draft log.
+    """
+    excluded = load_do_not_draft() if excluded is None else excluded
+    out = frame.copy()
+    if not excluded or out.empty:
+        out["excluded"] = False
+        return out
+    out["excluded"] = out["name"].str.lower().isin(excluded)
+    if out["excluded"].any():
+        logger.info("do-not-draft: %s",
+                    ", ".join(sorted(out.loc[out["excluded"], "name"])))
     return out

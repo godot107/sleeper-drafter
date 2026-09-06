@@ -378,3 +378,63 @@ class TestPositionalOutlook:
         short = survival_over(state, ranked, [2, 3])
         long = survival_over(state, ranked, list(range(2, 24)))
         assert long["survival"].mean() < short["survival"].mean()
+
+
+class TestRosterCapsAndExclusions:
+    """Two judgement channels the projections cannot supply.
+
+    Replaying a finished draft, the engine wanted a third tight end at three
+    separate picks behind a starter it already had, plus a backup quarterback at
+    two more -- five bench picks on positions that stream freely off waivers.
+    The depth penalty alone never stopped it, because once every slot is filled
+    a bench body adds nothing to the lineup, so the ranking falls back on VONA,
+    and VONA is largest exactly where the pool is shallowest.
+    """
+
+    @pytest.fixture
+    def schema(self):
+        return RosterSchema(
+            teams=12, rounds=15,
+            starters={"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 1, "DEF": 1},
+            flex={"FLEX": 1}, bench=6,
+        )
+
+    @pytest.fixture
+    def frame(self):
+        return pd.DataFrame([
+            {"player_id": "te", "name": "BackupTE", "pos": "TE", "team": "X",
+             "proj_pts": 150.0, "adp": 90.0, "vorp": 40.0, "risk": "steady"},
+            {"player_id": "qb", "name": "BackupQB", "pos": "QB", "team": "X",
+             "proj_pts": 300.0, "adp": 95.0, "vorp": 25.0, "risk": "steady"},
+            {"player_id": "rb", "name": "DepthRB", "pos": "RB", "team": "X",
+             "proj_pts": 140.0, "adp": 92.0, "vorp": 35.0, "risk": "steady"},
+        ])
+
+    def test_a_filled_capped_position_is_blocked(self, frame, schema):
+        team = Team(1, 1, slot_counts={"QB": 1, "TE": 1, "RB": 2, "WR": 2})
+        fit = roster_fit(frame, team, schema, round_no=10)
+        assert fit.iloc[0] == HARD_BLOCK      # second TE
+        assert fit.iloc[1] == HARD_BLOCK      # second QB
+        assert fit.iloc[2] > HARD_BLOCK       # another RB is still fine
+
+    def test_the_first_one_is_not_blocked(self, frame, schema):
+        fit = roster_fit(frame, Team(1, 1), schema, round_no=3)
+        assert fit.iloc[0] > HARD_BLOCK
+        assert fit.iloc[1] > HARD_BLOCK
+
+    def test_excluded_players_are_blocked_but_stay_on_the_board(self, frame, schema):
+        """They must still be nameable -- someone else will draft them."""
+        marked = frame.assign(excluded=[False, False, True])
+        fit = roster_fit(marked, Team(1, 1), schema, round_no=3)
+        assert fit.iloc[2] == HARD_BLOCK
+        assert len(marked) == len(frame), "exclusion must not drop the row"
+
+    def test_exclusion_file_parsing(self, tmp_path):
+        from src.valuation import load_do_not_draft
+        path = tmp_path / "dnd.txt"
+        path.write_text("# a comment\n\nDeebo Samuel   # injury history\nJohn Doe\n")
+        assert load_do_not_draft(path) == {"deebo samuel", "john doe"}
+
+    def test_missing_exclusion_file_is_fine(self, tmp_path):
+        from src.valuation import load_do_not_draft
+        assert load_do_not_draft(tmp_path / "nope.txt") == set()
