@@ -192,6 +192,64 @@ def standings_panel(state: DraftState, board: pd.DataFrame, my_slot: int) -> Pan
     return Panel(table, title=title, border_style="dim", title_align="left")
 
 
+def my_slot_for(state: DraftState, ranked: pd.DataFrame) -> int:
+    """The slot currently on the clock -- at a turn that is the user's own."""
+    return state.slot_at(state.current_pick_no)
+
+
+def outlook_panel(state: DraftState, ranked: pd.DataFrame, window: list[int]) -> Panel | None:
+    """What each position costs you to wait on, and whether its top will last."""
+    from .optimizer import positional_outlook, survival_over
+    from .state import picks_until_next_turn
+
+    if ranked.empty:
+        return None
+
+    title = "Positional outlook — where the wait actually hurts"
+    if not window:
+        # Back-to-back picks. Survival to the very next pick is trivially 100%
+        # for everyone, which tells you nothing. What matters is the gap *after*
+        # the pair -- whatever you do not take in these two is what you are
+        # betting will still be there. Shown as information, deliberately not
+        # folded into the score: scoring against that horizon was A/B tested
+        # over 20 drafts at slots 1 and 12 and came out slightly worse, because
+        # you get both players either way, so the pair is the same regardless.
+        after = picks_until_next_turn(
+            my_slot_for(state, ranked), state.current_pick_no + 1, state.teams,
+            total_picks=state.total_picks, draft_type=state.draft_type,
+            reversal_round=state.reversal_round,
+        )
+        if after:
+            ranked = survival_over(state, ranked, after)
+            title = (f"Positional outlook — the {len(after)}-pick gap AFTER your "
+                     f"back-to-back pair")
+    frame = positional_outlook(state, ranked, window)
+    if frame.empty:
+        return None
+
+    table = Table.grid(padding=(0, 2))
+    for _ in range(5):
+        table.add_column()
+    table.add_row(
+        Text("pos", style="dim"), Text("best available", style="dim"),
+        Text("cost of waiting", style="dim"), Text("top-3 survival", style="dim"),
+        Text("", style="dim"),
+    )
+    for _, row in frame.iterrows():
+        survival = row["top_survival"]
+        # Low survival is the signal to spend this pick here.
+        style = "bold yellow" if survival < 0.4 else ("green" if survival > 0.7 else "")
+        note = "vanishing" if survival < 0.4 else ("will wait" if survival > 0.7 else "")
+        table.add_row(
+            Text(row["pos"], style=POS_STYLE.get(row["pos"], "")),
+            Text(str(row["best"])[:22]),
+            Text(f"{row['cost_of_waiting']:+.0f} pts"),
+            Text(f"{survival * 100:.0f}%", style=style),
+            Text(note, style=style),
+        )
+    return Panel(table, title=title, border_style="dim", title_align="left")
+
+
 def recent_picks(state: DraftState, board: pd.DataFrame, n: int = 5) -> Panel:
     names = board.set_index("player_id")
     lines = []
@@ -222,6 +280,9 @@ def dashboard(
     warning = run_warning(state, board, window, available=ranked)
     if warning:
         parts.append(warning)
+    outlook = outlook_panel(state, ranked, window)
+    if outlook:
+        parts.append(outlook)
     if show_standings:
         standings = standings_panel(state, board, my_slot)
         if standings:

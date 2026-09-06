@@ -269,3 +269,69 @@ def scarcity_bar(expected: dict[str, float], theme: str) -> go.Figure:
     fig.update_xaxes(title="expected picks before your turn")
     fig.update_yaxes(title=None)
     return fig
+
+
+def outlook_table(state, ranked: pd.DataFrame, window: list[int], theme: str):
+    """Positional outlook as a plain HTML table (not a chart -- it is six rows).
+
+    Deliberately not a chart. Six labelled rows of two numbers each is a table;
+    drawing it as bars would add ink without adding information.
+    """
+    from dash import html
+
+    from .optimizer import positional_outlook, survival_over
+    from .state import picks_until_next_turn
+
+    if state is None or ranked.empty:
+        return ""
+
+    horizon = window
+    caption = "until your next pick"
+    if not window:
+        after = picks_until_next_turn(
+            state.slot_at(state.current_pick_no), state.current_pick_no + 1,
+            state.teams, total_picks=state.total_picks,
+            draft_type=state.draft_type, reversal_round=state.reversal_round,
+        )
+        if after:
+            ranked = survival_over(state, ranked, after)
+            caption = f"over the {len(after)}-pick gap after your back-to-back pair"
+
+    frame = positional_outlook(state, ranked, horizon)
+    if frame.empty:
+        return ""
+
+    c = palette(theme)
+    header = html.Tr([
+        html.Th(h, style={"textAlign": a, "color": c["muted"], "fontWeight": "500",
+                          "fontSize": "11px", "textTransform": "uppercase",
+                          "letterSpacing": ".05em", "padding": "0 0 6px",
+                          "borderBottom": f"1px solid {c['border']}"})
+        for h, a in (("pos", "left"), ("best available", "left"),
+                     ("cost of waiting", "right"), ("top-3 survival", "right"),
+                     ("", "left"))
+    ])
+    rows = []
+    for _, r in frame.iterrows():
+        surv = r["top_survival"]
+        if surv < 0.4:
+            tone, note = c["critical"], "vanishing"
+        elif surv > 0.7:
+            tone, note = c["good"], "will wait"
+        else:
+            tone, note = c["text_secondary"], ""
+        rows.append(html.Tr([
+            html.Td(r["pos"], style={"padding": "6px 0", "fontWeight": "600"}),
+            html.Td(str(r["best"])[:24], style={"color": c["text_secondary"]}),
+            html.Td(f"{r['cost_of_waiting']:+.0f}",
+                    style={"textAlign": "right", "fontVariantNumeric": "tabular-nums"}),
+            html.Td(f"{surv * 100:.0f}%",
+                    style={"textAlign": "right", "color": tone, "fontWeight": "600",
+                           "fontVariantNumeric": "tabular-nums"}),
+            html.Td(note, style={"color": tone, "paddingLeft": "10px", "fontSize": "12px"}),
+        ]))
+    return html.Div([
+        html.Table([html.Thead(header), html.Tbody(rows)],
+                   style={"width": "100%", "borderCollapse": "collapse", "fontSize": "13px"}),
+        html.P(caption, style={"color": c["muted"], "fontSize": "11px", "marginTop": "8px"}),
+    ])

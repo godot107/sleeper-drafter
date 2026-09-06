@@ -314,3 +314,67 @@ class TestSharedFlexCapacity:
         ])
         fit = roster_fit(frame, team, schema, round_no=8)
         assert fit.iloc[1] > fit.iloc[0], "the WR filling WR2 must outrank bench depth"
+
+
+class TestPositionalOutlook:
+    """The allocation view the per-pick score cannot express.
+
+    A single pick only ever compares players against their own position's
+    next-best, so it cannot say "receivers are about to vanish and tight ends
+    will wait". That distinction is what a turn-slot draft turns on.
+    """
+
+    @pytest.fixture
+    def live(self):
+        rows = []
+        for pos, base, n in [("QB", 360, 30), ("RB", 300, 60), ("WR", 260, 60),
+                             ("TE", 200, 30), ("K", 120, 20), ("DEF", 110, 20)]:
+            for i in range(n):
+                rows.append({"player_id": f"{pos}{i}", "name": f"{pos}{i}", "pos": pos,
+                             "team": "X", "proj_pts": float(base - i * 5),
+                             "adp": float(i * 4 + 1)})
+        proj = pd.DataFrame(rows)
+        draft, league = mock_draft_object(teams=12, rounds=15)
+        state = DraftState(draft, proj, league=league)
+        board = build_board(proj, {p: state.schema.total_starters(p) for p in STARTERS},
+                            state.teams)
+        return state, board
+
+    def test_one_row_per_available_position(self, live):
+        from src.optimizer import positional_outlook
+        state, board = live
+        ranked, window = rank_with_lookahead(state, board, my_slot=6)
+        frame = positional_outlook(state, ranked, window)
+        assert set(frame["pos"]) <= set(STARTERS)
+        assert len(frame) == ranked["pos"].nunique()
+
+    def test_sorted_by_what_the_wait_costs(self, live):
+        from src.optimizer import positional_outlook
+        state, board = live
+        ranked, window = rank_with_lookahead(state, board, my_slot=6)
+        frame = positional_outlook(state, ranked, window)
+        assert frame["cost_of_waiting"].is_monotonic_decreasing
+
+    def test_survival_is_a_probability(self, live):
+        from src.optimizer import positional_outlook
+        state, board = live
+        ranked, window = rank_with_lookahead(state, board, my_slot=6)
+        frame = positional_outlook(state, ranked, window)
+        assert ((frame["top_survival"] >= 0) & (frame["top_survival"] <= 1)).all()
+
+    def test_survival_over_does_not_disturb_the_ranking(self, live):
+        """The alternate horizon is a view, never an input to the score."""
+        from src.optimizer import survival_over
+        state, board = live
+        ranked, _ = rank_with_lookahead(state, board, my_slot=6)
+        alt = survival_over(state, ranked, [state.current_pick_no + i for i in range(1, 20)])
+        assert list(alt["player_id"]) == list(ranked["player_id"])
+        assert (alt["score"] == ranked["score"]).all()
+
+    def test_a_longer_window_lowers_survival(self, live):
+        from src.optimizer import survival_over
+        state, board = live
+        ranked, _ = rank_with_lookahead(state, board, my_slot=6)
+        short = survival_over(state, ranked, [2, 3])
+        long = survival_over(state, ranked, list(range(2, 24)))
+        assert long["survival"].mean() < short["survival"].mean()

@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 from dash import Dash, Input, Output, dash_table, dcc, html
 
-from .charts import decision_scatter, scarcity_bar, standings_bar, value_cliff
+from .charts import decision_scatter, outlook_table, scarcity_bar, standings_bar, value_cliff
 from .config import settings
 from .optimizer import rank_with_lookahead
 from .rating import rate_teams
@@ -45,6 +45,7 @@ class Snapshot:
 
     ranked: pd.DataFrame = field(default_factory=pd.DataFrame)
     board: pd.DataFrame = field(default_factory=pd.DataFrame)
+    state: object = None
     rated: pd.DataFrame = field(default_factory=pd.DataFrame)
     window: list[int] = field(default_factory=list)
     expected: dict[str, float] = field(default_factory=dict)
@@ -131,7 +132,7 @@ def build_snapshot(
         changed = previous.changed_at
 
     return Snapshot(
-        ranked=ranked, board=board, rated=rated, window=window, expected=expected,
+        ranked=ranked, board=board, state=state, rated=rated, window=window, expected=expected,
         info=info, roster=roster_rows, changed_at=changed, polled_at=now,
         age_s=age_s, error=error,
     )
@@ -345,6 +346,15 @@ def create_app(publisher: Publisher) -> Dash:
                 dcc.Graph(id="g-decision", config={"displayModeBar": False}),
             ]),
             html.Div(className="card", children=[
+                html.H3("Positional outlook"),
+                html.P("What each position costs you to wait on, and whether its "
+                       "top three will still be there.", className="sub"),
+                html.Div(id="outlook"),
+            ]),
+        ]),
+
+        html.Div(className="grid2", children=[
+            html.Div(className="card", children=[
                 html.H3("Coming off the board"),
                 html.P("Expected picks per position before your next turn.", className="sub"),
                 dcc.Graph(id="g-scarcity", config={"displayModeBar": False}),
@@ -415,7 +425,7 @@ def create_app(publisher: Publisher) -> Dash:
         Output("g-decision", "figure"), Output("g-scarcity", "figure"),
         Output("g-cliff", "figure"), Output("g-standings", "figure"),
         Output("table", "data"), Output("table", "columns"),
-        Output("roster", "children"),
+        Output("outlook", "children"), Output("roster", "children"),
         Input("tick", "n_intervals"), Input("f-pos", "value"),
         Input("f-risk", "value"), Input("f-role", "value"), Input("f-tier", "value"),
         Input("f-name", "value"), Input("f-only-need", "value"),
@@ -429,7 +439,7 @@ def create_app(publisher: Publisher) -> Dash:
         if not info:
             empty = value_cliff(pd.DataFrame(columns=["pos"]), theme or "light")
             return ([html.Span("waiting for draft data…")], [], empty, empty, empty,
-                    empty, [], [], "")
+                    empty, [], [], "", "")
 
         # --- freshness, stated plainly
         since = time.time() - (snap.changed_at or time.time())
@@ -461,6 +471,7 @@ def create_app(publisher: Publisher) -> Dash:
         ]
 
         view = _filtered(snap, positions, risks, roles, max_tier, name, only_need)
+        state_for_outlook = snap.state
         best = view.iloc[0] if not view.empty else None
         tiles = [
             _tile("on the clock", f"{info['round']}.{info['in_round']:02d}",
@@ -514,13 +525,16 @@ def create_app(publisher: Publisher) -> Dash:
             ])]
         ) if snap.roster else html.Div("no picks yet", style={"color": "var(--muted)"})
 
+        outlook = outlook_table(state_for_outlook, view, snap.window, theme or "light") \
+            if state_for_outlook is not None else ""
+
         return (
             bar, tiles,
             decision_scatter(view, theme or "light"),
             scarcity_bar(snap.expected, theme or "light"),
             value_cliff(view if not view.empty else snap.ranked, theme or "light"),
             standings_bar(snap.rated, info["my_roster"], theme or "light"),
-            rows, columns, roster,
+            rows, columns, outlook, roster,
         )
 
     return app
