@@ -1,0 +1,2 @@
+draft_id,teams,rounds,scoring,my_slot,n_observations,predicted_mean,actual_mean,brier,bias
+1402173887956971520,10,15,std,3,840,0.910654794942478,0.8595238095238096,0.07821632956983553,0.05113098541866845

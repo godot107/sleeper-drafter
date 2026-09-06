@@ -20,13 +20,14 @@ python main.py --find-draft <username>         # discover your draft_id and slot
 python main.py --mock --slot 5                 # offline simulated draft
 python main.py --mock --slot 5 --step          # pause at each of your picks
 python main.py --export-cheatsheet             # static fallback board (print this)
+python main.py --replay <draft_id>             # score the model against a finished draft
 python main.py --draft-id <id> --slot 5        # draft night (terminal UI)
 
 python main.py --web --mock --slot 12          # browser dashboard, simulated draft
 python main.py --web --draft-id <id> --slot 12 # browser dashboard, live
 # -> http://localhost:8050  (--port to change; --host 0.0.0.0 to reach another device)
 
-pytest -q                                      # 111 tests
+pytest -q                                      # 124 tests
 ```
 
 ## Layout
@@ -44,6 +45,8 @@ pytest -q                                      # 111 tests
 - `src/theme.py` — validated palette and chart chrome for both themes.
 - `src/rating.py` — best-lineup fill and league draft grades.
 - `src/mock.py` — offline draft simulation.
+- `src/replay.py` — scores survival predictions against a completed draft; appends to a
+  calibration log so evidence accumulates across drafts.
 - `scripts/` — the two data builders. Both write frozen CSV snapshots.
 - `data/` — generated artifacts; all gitignored, all rebuildable.
 

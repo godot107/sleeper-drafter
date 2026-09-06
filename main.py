@@ -15,6 +15,10 @@ Try it with no live draft:
     python main.py --mock --slot 12              # terminal, simulated draft
     python main.py --web --mock --slot 12        # browser dashboard, simulated
 
+After the draft (scores the model against real human picks):
+
+    python main.py --replay <draft_id>           # calibration + pick comparison
+
 Draft night:
 
     python main.py --find-draft <username>       # look up draft_id and your slot
@@ -178,6 +182,91 @@ def cmd_mock(slot: int, teams: int, rounds: int, seed: int, step: bool) -> int:
     return 0
 
 
+def cmd_replay(draft_id: str, slot: int | None, log: Path) -> int:
+    """Score the engine against a completed draft."""
+    from src.replay import append_log, replay
+
+    proj, cons = load_inputs()
+    client = SleeperClient()
+    try:
+        draft = client.draft(draft_id)
+        picks = client.picks(draft_id)
+    except NotFound:
+        console.print(f"[bold red]No draft '{draft_id}'.[/]")
+        return 1
+    if not picks:
+        console.print("[yellow]That draft has no picks yet.[/]")
+        return 1
+
+    league = None
+    if draft.get("league_id"):
+        try:
+            league = client.league(draft["league_id"])
+        except SleeperError:
+            pass
+
+    state = DraftState(draft, proj, league=league)
+    board = make_board(state, proj, cons)
+
+    if slot is None:
+        order = draft.get("draft_order") or {}
+        slot = next(iter(order.values()), None)
+        if slot is None:
+            console.print("[bold red]--slot is required (no draft_order on this draft).[/]")
+            return 2
+        console.print(f"[dim]using slot {slot} from draft_order[/]")
+
+    report = replay(draft, picks, board, int(slot))
+
+    console.print(f"\n[bold]Replay {report['draft_id']}[/]  "
+                  f"{report['teams']}x{report['rounds']} {report['scoring']}, "
+                  f"slot {report['my_slot']}  ({len(picks)} picks)")
+
+    console.print("\n[bold]Survival calibration[/]")
+    cal = report["calibration"]
+    console.print(f"  {'predicted':>12} {'n':>6} {'mean pred':>11} {'actual':>9}")
+    for _, r in cal.iterrows():
+        flag = "" if abs(r["predicted"] - r["actual"]) < 0.1 else "  <-- off"
+        console.print(f"  {str(r['bucket']):>12} {int(r['n']):>6} "
+                      f"{r['predicted']*100:>10.0f}% {r['actual']*100:>8.0f}%{flag}")
+    bias = report["predicted_mean"] - report["actual_mean"]
+    console.print(f"\n  overall predicted [bold]{report['predicted_mean']*100:.1f}%[/] "
+                  f"vs actual [bold]{report['actual_mean']*100:.1f}%[/]  "
+                  f"(bias {bias*100:+.1f} pts)")
+    console.print(f"  Brier {report['brier']:.3f}   [dim](0 perfect, 0.25 coin flip)[/]")
+
+    comp = report["comparisons"]
+    if not comp.empty:
+        gone = int(comp["engine_gone_by_next"].sum())
+        console.print(f"\n[bold]Top recommendation[/]")
+        console.print(f"  gone by your next pick: {gone}/{len(comp)} "
+                      f"({gone/len(comp)*100:.0f}%) [dim]— high is good, "
+                      f"it means 'take him now' was right[/]")
+        console.print(f"  agreed with your actual pick: "
+                      f"{int(comp['agreed'].sum())}/{len(comp)}")
+        delta = (comp["engine_vorp"] - comp["actual_vorp"]).mean()
+        console.print(f"  mean VORP difference: {delta:+.1f}/pick "
+                      f"[dim]— naive: holds the rest of the draft fixed, and "
+                      f"where you overrode it you may well have been right[/]")
+        console.print("\n  [dim]pick   engine                    actual[/]")
+        for _, r in comp.iterrows():
+            mark = "=" if r["agreed"] else " "
+            console.print(f"  {int(r['pick_no']):>4} {mark} {str(r['engine'])[:24]:<25} "
+                          f"{str(r['actual'])[:24]}")
+
+    append_log(report, log)
+    console.print(f"\n[green]appended to[/] {log}")
+    prior = pd.read_csv(log)
+    if len(prior) > 1:
+        console.print(f"[bold]{len(prior)} drafts logged[/] — mean bias "
+                      f"{prior['bias'].mean()*100:+.1f} pts, "
+                      f"mean Brier {prior['brier'].mean():.3f}")
+    else:
+        console.print("[dim]one draft is ~15 independent events; replay a few more "
+                      "before fitting any correction.[/]")
+    return 0
+
+
 def cmd_web(draft_id: str | None, slot: int, port: int, host: str,
             mock: bool, teams: int, rounds: int, seed: int,
             seconds_per_pick: float) -> int:
@@ -310,6 +399,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="look up a user's draft ids and slots for the season")
     mode.add_argument("--export-cheatsheet", action="store_true",
                       help="write the static fallback board and exit")
+    mode.add_argument("--replay", metavar="ID",
+                      help="score the engine against a completed draft")
     mode.add_argument("--web", action="store_true",
                       help="serve the browser dashboard instead of the terminal UI")
 
@@ -343,6 +434,10 @@ def main(argv: list[str] | None = None) -> int:
     misc.add_argument("-o", "--out", type=Path,
                       default=settings.data_dir / "cheatsheet.csv", metavar="PATH",
                       help="where --export-cheatsheet writes (default: data/cheatsheet.csv)")
+    misc.add_argument("--calibration-log", type=Path,
+                      default=settings.data_dir / "calibration.csv", metavar="PATH",
+                      help="where --replay accumulates results "
+                           "(default: data/calibration.csv)")
     misc.add_argument("-v", "--verbose", action="store_true",
                       help="debug logging")
 
@@ -357,6 +452,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_find_draft(args.find_draft, args.season)
     if args.export_cheatsheet:
         return cmd_export_cheatsheet(args.out, args.teams, args.rounds)
+    if args.replay:
+        return cmd_replay(args.replay, args.slot, args.calibration_log)
     if args.web:
         if not args.mock and not args.draft_id:
             ap.error("--web needs either --draft-id or --mock")

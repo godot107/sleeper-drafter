@@ -44,6 +44,7 @@ python main.py --find-draft <username>    # find your draft_id
 python main.py --draft-id <id> --slot 5   # draft night, terminal
 
 python main.py --web --mock --slot 12     # browser dashboard on a simulated draft
+python main.py --replay <draft_id>        # score the model against a finished draft
 ```
 
 ## Two front ends
@@ -118,7 +119,8 @@ Stated plainly, because they affect how much to trust a given number.
   — players the model calls 40-60% survived only 19% of the time. That is the independence
   assumption showing up exactly where predicted. A single-parameter correction would fit
   the overall mean but overcorrects the low bucket, and one draft is ~15 independent
-  events, so nothing is baked in yet; `--replay` exists to accumulate the evidence.
+  events, so nothing is baked in yet. `--replay <draft_id>` scores any finished draft and
+  appends to `data/calibration.csv`; fit a correction once several drafts are logged.
 - **The `risk` label is weaker than it looks.** CV measures week-to-week bounce, not
   upside. Prefer `role` (depth chart + volume) for quality and `ceiling` for late-round
   upside — see below.
@@ -144,7 +146,7 @@ week-to-week bounce.
 ## Development
 
 ```bash
-pytest -q     # 99 tests
+pytest -q     # 124 tests
 ```
 
 The pick arithmetic, survival normalisation, VONA exclusion, and roster-legality
