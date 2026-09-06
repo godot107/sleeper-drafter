@@ -4,10 +4,25 @@ Read-only: this observes a draft and ranks your options. It never drafts for
 you -- Sleeper's public API has no write endpoints, and that is a feature. You
 keep the veto when injury news breaks mid-draft.
 
-    python main.py --find-draft <username>       # discover your draft_id
-    python main.py --mock --slot 5               # offline dry run
-    python main.py --draft-id <id> --slot 5      # draft night
-    python main.py --export-cheatsheet           # the paper fallback
+Before the draft (build the data; both write frozen snapshots):
+
+    python scripts/fetch_projections.py          # real projected points + ADP
+    python scripts/fetch_consistency.py          # weekly-variance risk labels
+    python main.py --export-cheatsheet           # the paper fallback -- print it
+
+Try it with no live draft:
+
+    python main.py --mock --slot 12              # terminal, simulated draft
+    python main.py --web --mock --slot 12        # browser dashboard, simulated
+
+Draft night:
+
+    python main.py --find-draft <username>       # look up draft_id and your slot
+    python main.py --draft-id <id> --slot 12     # terminal UI
+    python main.py --web --draft-id <id> --slot 12   # browser dashboard
+
+The two front ends can run at once -- they share no state and the browser never
+calls Sleeper, so a second window costs nothing.
 """
 
 from __future__ import annotations
@@ -277,30 +292,60 @@ def cmd_live(draft_id: str, slot: int | None, top_n: int) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="sleeper-drafter", description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--draft-id", help="Sleeper draft id to watch live")
-    ap.add_argument("--slot", type=int, help="your 1-indexed draft slot")
-    ap.add_argument("--mock", action="store_true", help="run an offline simulated draft")
-    ap.add_argument("--find-draft", metavar="USERNAME", help="look up your draft ids")
-    ap.add_argument("--export-cheatsheet", action="store_true",
-                    help="write the static fallback board")
-    ap.add_argument("--season", default=settings.season)
-    ap.add_argument("--teams", type=int, default=12)
-    ap.add_argument("--rounds", type=int, default=15)
-    ap.add_argument("--top", type=int, default=10, help="recommendations to show")
-    ap.add_argument("--seed", type=int, default=0, help="mock draft rng seed")
-    ap.add_argument("--step", action="store_true", help="pause at each of your picks")
-    ap.add_argument("--web", action="store_true",
-                    help="serve the browser dashboard instead of the terminal UI")
-    ap.add_argument("--port", type=int, default=8050)
-    ap.add_argument("--host", default="127.0.0.1",
-                    help="use 0.0.0.0 to reach it from another device")
-    ap.add_argument("--seconds-per-pick", type=float, default=3.0,
-                    help="mock draft speed for --web --mock")
-    ap.add_argument("-o", "--out", type=Path,
-                    default=settings.data_dir / "cheatsheet.csv")
-    ap.add_argument("-v", "--verbose", action="store_true")
+    ap = argparse.ArgumentParser(
+        prog="sleeper-drafter", description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Your slot is 1-indexed and matches the Sleeper draft board "
+               "left-to-right. --find-draft prints it for you.",
+    )
+
+    mode = ap.add_argument_group(
+        "what to run", "pick exactly one; --web pairs with --draft-id or --mock"
+    )
+    mode.add_argument("--draft-id", metavar="ID",
+                      help="watch a live Sleeper draft")
+    mode.add_argument("--mock", action="store_true",
+                      help="simulate a draft offline, no network")
+    mode.add_argument("--find-draft", metavar="USERNAME",
+                      help="look up a user's draft ids and slots for the season")
+    mode.add_argument("--export-cheatsheet", action="store_true",
+                      help="write the static fallback board and exit")
+    mode.add_argument("--web", action="store_true",
+                      help="serve the browser dashboard instead of the terminal UI")
+
+    draft = ap.add_argument_group("your draft")
+    draft.add_argument("--slot", type=int, metavar="N",
+                       help="your 1-indexed draft slot (required for a live draft)")
+    draft.add_argument("--season", default=settings.season, metavar="YEAR",
+                       help=f"season to look up (default: {settings.season})")
+    draft.add_argument("--teams", type=int, default=12, metavar="N",
+                       help="league size for --mock and --export-cheatsheet (default: 12)")
+    draft.add_argument("--rounds", type=int, default=15, metavar="N",
+                       help="rounds for --mock and --export-cheatsheet (default: 15)")
+
+    web = ap.add_argument_group("browser dashboard (--web)")
+    web.add_argument("--port", type=int, default=8050, metavar="N",
+                     help="default: 8050")
+    web.add_argument("--host", default="127.0.0.1", metavar="ADDR",
+                     help="0.0.0.0 to reach it from another device (default: 127.0.0.1)")
+    web.add_argument("--seconds-per-pick", type=float, default=3.0, metavar="SECS",
+                     help="simulated draft speed for --web --mock (default: 3.0)")
+
+    tui = ap.add_argument_group("terminal UI")
+    tui.add_argument("--top", type=int, default=10, metavar="N",
+                     help="recommendations to show (default: 10); needs >=120 columns")
+    tui.add_argument("--step", action="store_true",
+                     help="pause at each of your picks during --mock")
+
+    misc = ap.add_argument_group("other")
+    misc.add_argument("--seed", type=int, default=0, metavar="N",
+                      help="rng seed for a repeatable mock draft (default: 0)")
+    misc.add_argument("-o", "--out", type=Path,
+                      default=settings.data_dir / "cheatsheet.csv", metavar="PATH",
+                      help="where --export-cheatsheet writes (default: data/cheatsheet.csv)")
+    misc.add_argument("-v", "--verbose", action="store_true",
+                      help="debug logging")
+
     args = ap.parse_args(argv)
 
     logging.basicConfig(
