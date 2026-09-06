@@ -159,7 +159,6 @@ class RosterSchema:
         logger.warning("no roster_positions available; falling back to draft settings.slots_*")
         starters = {}
         flex = {}
-        bench = int(settings.get("slots_bn") or 0)
         for key, value in settings.items():
             if not key.startswith("slots_") or not value:
                 continue
@@ -170,6 +169,21 @@ class RosterSchema:
                 flex[name] = int(value)
             else:
                 starters[name] = int(value)
+
+        # Standalone mock drafts carry no `slots_bn`, which used to leave bench
+        # at 0. That is not cosmetic: with no bench every round looks like a
+        # starting slot, so the mandatory-slot constraint fires several rounds
+        # early and starts forcing K/DEF around round 10 instead of 13. Infer
+        # the bench from the rounds the starting slots cannot account for.
+        declared_bench = settings.get("slots_bn")
+        if declared_bench:
+            bench = int(declared_bench)
+        else:
+            starting_slots = sum(starters.values()) + sum(flex.values())
+            bench = max(0, rounds - starting_slots)
+            logger.info("no slots_bn; inferred %d bench spots (%d rounds - %d starters)",
+                        bench, rounds, starting_slots)
+
         return cls(teams=teams, rounds=rounds, starters=starters, flex=flex, bench=bench)
 
 

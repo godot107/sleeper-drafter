@@ -215,3 +215,48 @@ class TestSurvivalCalibration:
     def test_sigma_grows_through_the_draft(self):
         from src.opponent_model import effective_sigma
         assert effective_sigma(5) < effective_sigma(50) < effective_sigma(150)
+
+
+class TestBenchInference:
+    """A standalone mock draft exposes no slots_bn.
+
+    Leaving bench at 0 made every round look like a starting slot, so the
+    mandatory-slot constraint fired ~3 rounds early and started forcing K/DEF
+    in round 10 of a 15-round draft.
+    """
+
+    def test_infers_bench_when_slots_bn_is_absent(self):
+        draft = {
+            "draft_id": "x", "type": "snake",
+            "settings": {"teams": 10, "rounds": 15, "slots_qb": 1, "slots_rb": 2,
+                         "slots_wr": 2, "slots_te": 1, "slots_flex": 2,
+                         "slots_k": 1, "slots_def": 1},
+        }
+        schema = RosterSchema.from_league(draft, None)
+        assert sum(schema.starters.values()) + sum(schema.flex.values()) == 10
+        assert schema.bench == 5  # 15 rounds - 10 starting slots
+
+    def test_declared_bench_still_wins(self):
+        draft = {
+            "draft_id": "x", "type": "snake",
+            "settings": {"teams": 10, "rounds": 15, "slots_qb": 1, "slots_rb": 2,
+                         "slots_wr": 2, "slots_te": 1, "slots_flex": 2,
+                         "slots_k": 1, "slots_def": 1, "slots_bn": 6},
+        }
+        assert RosterSchema.from_league(draft, None).bench == 6
+
+    def test_kdef_not_forced_too_early_in_a_standalone_mock(self):
+        draft = {
+            "draft_id": "x", "type": "snake",
+            "settings": {"teams": 10, "rounds": 15, "slots_qb": 1, "slots_rb": 2,
+                         "slots_wr": 2, "slots_te": 1, "slots_flex": 2,
+                         "slots_k": 1, "slots_def": 1},
+        }
+        schema = RosterSchema.from_league(draft, None)
+        frame = pd.DataFrame([
+            {"player_id": "a", "name": "A", "pos": "RB", "team": "X",
+             "proj_pts": 200.0, "adp": 40.0, "vorp": 60.0, "risk": "steady"},
+        ])
+        # Round 10 with a bare roster: still far too early to be forced into K/DEF.
+        fit = roster_fit(frame, Team(1, 1), schema, round_no=10)
+        assert fit.iloc[0] > HARD_BLOCK

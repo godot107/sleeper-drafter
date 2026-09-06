@@ -194,9 +194,22 @@ class SleeperClient:
     def picks(self, draft_id: str) -> list[dict]:
         """Every pick made so far, oldest first.
 
-        Polled conditionally: an unchanged draft returns 304 with no body.
+        **Cache-busted, deliberately.** Sleeper serves this endpoint with
+        ``cache-control: s-maxage=300``, and during a live draft that is not
+        theoretical: measured against a real draft, a plain request came back
+        with ``Age: 261`` and three picks while the draft was actually on its
+        forty-third. A board four minutes stale is worse than no board, because
+        it looks current.
+
+        A unique query parameter forces ``cf-cache-status: MISS`` and a fresh
+        origin read. That costs the ETag optimisation -- a busted URL can never
+        304 -- which is the right trade here: correctness over bytes. The
+        payload is small (tens of KB) and the poll rate is a few per minute.
         """
-        return self._get_json(f"{API_V1}/draft/{draft_id}/picks", conditional=True)
+        return self._get_json(
+            f"{API_V1}/draft/{draft_id}/picks",
+            params={"_": str(int(time.time() * 1000))},
+        )
 
     def traded_picks(self, draft_id: str) -> list[dict]:
         """Traded picks, so urgency is attributed to the roster actually picking.
