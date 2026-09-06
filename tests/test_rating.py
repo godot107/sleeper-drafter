@@ -104,7 +104,9 @@ class TestBestLineup:
         running back, and the engine asked for a tight end at four picks in one
         draft where it added nothing.
         """
-        roster = ["qb1", "rb1", "rb2", "wr1", "wr2", "te1", "k1", "def1"]
+        # Every dedicated slot filled (the fixture starts 3 WRs), so the flex
+        # is the only empty one.
+        roster = ["qb1", "rb1", "rb2", "wr1", "wr2", "wr3", "te1", "k1", "def1"]
         replacement = {"RB": 100.0, "WR": 110.0, "TE": 80.0}
         total, holes, _ = best_lineup(roster, POINTS, POSITIONS, schema, replacement)
         assert holes == 1                      # the flex is still reported empty
@@ -113,7 +115,7 @@ class TestBestLineup:
         assert total == pytest.approx(bare + 110.0)
 
     def test_filling_flex_beats_filling_it_with_a_worse_player(self, schema):
-        roster = ["qb1", "rb1", "rb2", "wr1", "wr2", "te1", "k1", "def1"]
+        roster = ["qb1", "rb1", "rb2", "wr1", "wr2", "wr3", "te1", "k1", "def1"]
         replacement = {"RB": 100.0, "WR": 110.0, "TE": 80.0}
         base, _, _ = best_lineup(roster, POINTS, POSITIONS, schema, replacement)
         better, _, _ = best_lineup(roster + ["rb3"], POINTS, POSITIONS, schema, replacement)
