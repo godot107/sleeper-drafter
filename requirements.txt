@@ -6,6 +6,9 @@ numpy>=1.26             # vectorised survival + VONA math (must stay <200ms per 
 # --- Terminal UI ---
 rich>=13.7              # rich.Live dashboard during the draft
 
+# --- Browser dashboard (optional; the terminal UI works without it) ---
+dash>=2.17              # interactive dashboard; bundles plotly + flask
+
 # --- Validation ---
 pydantic>=2.7           # validates Sleeper API payloads (shapes are inconsistent — see README)
 

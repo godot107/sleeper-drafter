@@ -163,6 +163,59 @@ def cmd_mock(slot: int, teams: int, rounds: int, seed: int, step: bool) -> int:
     return 0
 
 
+def cmd_web(draft_id: str | None, slot: int, port: int, host: str,
+            mock: bool, teams: int, rounds: int, seed: int,
+            seconds_per_pick: float) -> int:
+    """Serve the browser dashboard. One poller thread, many browser tabs."""
+    import threading
+
+    from src.web import Publisher, create_app, start_live_poller, start_mock_poller
+
+    proj, cons = load_inputs()
+    publisher = Publisher()
+    stop = threading.Event()
+
+    if mock:
+        draft, league = mock_draft_object(teams=teams, rounds=rounds)
+        state = DraftState(draft, proj, league=league)
+        board = make_board(state, proj, cons)
+        start_mock_poller(publisher, state, board, slot, stop,
+                          seconds_per_pick=seconds_per_pick, seed=seed)
+        console.print(f"[yellow]mock mode[/] — simulating a pick every {seconds_per_pick}s")
+    else:
+        client = SleeperClient()
+        try:
+            draft = client.draft(draft_id)
+        except NotFound:
+            console.print(f"[bold red]No draft '{draft_id}'.[/]")
+            return 1
+        league = None
+        if draft.get("league_id"):
+            try:
+                league = client.league(draft["league_id"])
+            except SleeperError as exc:
+                console.print(f"[yellow]League unavailable ({exc}); "
+                              f"falling back to draft slot settings.[/]")
+        state = DraftState(draft, proj, league=league,
+                           traded_picks=client.traded_picks(draft_id))
+        board = make_board(state, proj, cons)
+        start_live_poller(publisher, client, draft_id, state, board, slot, stop)
+        console.print(f"[green]watching[/] {draft_id}  "
+                      f"{state.teams} teams x {state.rounds} rounds, {state.scoring}")
+
+    app = create_app(publisher)
+    console.print(f"[bold]dashboard:[/] http://{host if host != '0.0.0.0' else 'localhost'}:{port}")
+    console.print("[dim]Ctrl+C to stop. The terminal UI can run alongside this "
+                  "in another window.[/]")
+    try:
+        app.run(host=host, port=port, debug=False)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop.set()
+    return 0
+
+
 def cmd_live(draft_id: str, slot: int | None, top_n: int) -> int:
     proj, cons = load_inputs()
     client = SleeperClient()
@@ -238,6 +291,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--top", type=int, default=10, help="recommendations to show")
     ap.add_argument("--seed", type=int, default=0, help="mock draft rng seed")
     ap.add_argument("--step", action="store_true", help="pause at each of your picks")
+    ap.add_argument("--web", action="store_true",
+                    help="serve the browser dashboard instead of the terminal UI")
+    ap.add_argument("--port", type=int, default=8050)
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="use 0.0.0.0 to reach it from another device")
+    ap.add_argument("--seconds-per-pick", type=float, default=3.0,
+                    help="mock draft speed for --web --mock")
     ap.add_argument("-o", "--out", type=Path,
                     default=settings.data_dir / "cheatsheet.csv")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -252,6 +312,12 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_find_draft(args.find_draft, args.season)
     if args.export_cheatsheet:
         return cmd_export_cheatsheet(args.out, args.teams, args.rounds)
+    if args.web:
+        if not args.mock and not args.draft_id:
+            ap.error("--web needs either --draft-id or --mock")
+        return cmd_web(args.draft_id, args.slot or 5, args.port, args.host,
+                       args.mock, args.teams, args.rounds, args.seed,
+                       args.seconds_per_pick)
     if args.mock:
         return cmd_mock(args.slot or 5, args.teams, args.rounds, args.seed, args.step)
     if args.draft_id:

@@ -41,8 +41,25 @@ python scripts/fetch_consistency.py       # weekly-variance risk labels
 
 python main.py --mock --slot 5            # try it offline
 python main.py --find-draft <username>    # find your draft_id
-python main.py --draft-id <id> --slot 5   # draft night
+python main.py --draft-id <id> --slot 5   # draft night, terminal
+
+python main.py --web --mock --slot 12     # browser dashboard on a simulated draft
 ```
+
+## Two front ends
+
+The **terminal UI** (`rich`) is the reliable one: a single process, no browser, works
+over SSH.
+
+The **browser dashboard** (`--web`) adds interactive filters and four charts — a
+take-now/wait scatter, value cliffs faceted by position, expected departures before your
+turn, and live league grades. It states when data last changed and turns amber then red
+as that ages, because a draft dashboard that has quietly stopped updating is worse than
+no dashboard.
+
+Both run at once, which is the intended multi-monitor setup: dashboard on one screen,
+terminal on another, the Sleeper app on a third. The browser never calls Sleeper — one
+background thread polls and publishes a snapshot that every view reads.
 
 See [RUNBOOK.md](RUNBOOK.md) for the draft-night procedure.
 

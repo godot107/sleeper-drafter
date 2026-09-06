@@ -20,9 +20,13 @@ python main.py --find-draft <username>         # discover your draft_id and slot
 python main.py --mock --slot 5                 # offline simulated draft
 python main.py --mock --slot 5 --step          # pause at each of your picks
 python main.py --export-cheatsheet             # static fallback board (print this)
-python main.py --draft-id <id> --slot 5        # draft night
+python main.py --draft-id <id> --slot 5        # draft night (terminal UI)
 
-pytest -q                                      # 99 tests
+python main.py --web --mock --slot 12          # browser dashboard, simulated draft
+python main.py --web --draft-id <id> --slot 12 # browser dashboard, live
+# -> http://localhost:8050  (--port to change; --host 0.0.0.0 to reach another device)
+
+pytest -q                                      # 111 tests
 ```
 
 ## Layout
@@ -34,7 +38,11 @@ pytest -q                                      # 99 tests
 - `src/valuation.py` — VORP, dropoff, tiers, consistency. The Petersen layer.
 - `src/opponent_model.py` — urgency, ADP kernel, normalised survival.
 - `src/optimizer.py` — VONA, denial, roster fit, final score.
-- `src/cli.py` — `rich` dashboard.
+- `src/cli.py` — `rich` terminal dashboard.
+- `src/web.py` — Dash browser dashboard: one poller thread publishes a snapshot, callbacks read it.
+- `src/charts.py` — Plotly figures.
+- `src/theme.py` — validated palette and chart chrome for both themes.
+- `src/rating.py` — best-lineup fill and league draft grades.
 - `src/mock.py` — offline draft simulation.
 - `scripts/` — the two data builders. Both write frozen CSV snapshots.
 - `data/` — generated artifacts; all gitignored, all rebuildable.
@@ -67,3 +75,10 @@ pytest -q                                      # 99 tests
 - **Denial stays weak (λ=0.25, window-scoped).** Petersen Ch.7 warns against joining a run
   mid-stream, which aggressive denial encourages.
 - **Recompute budget is 200ms.** Currently 13ms mean / 23ms max.
+- **The browser never calls Sleeper.** One background thread polls and publishes an
+  immutable snapshot; every Dash callback reads it. Extra tabs cost nothing, and a slow
+  network cannot wedge the UI.
+- **Chart colour is validated, not eyeballed.** The only frame where two series share
+  space is the standings chart, and that pair clears every colour-vision gate in both
+  themes. The value-cliff chart is faceted per position precisely so it does *not* need
+  six categorical hues, which could not pass.
