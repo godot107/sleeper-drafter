@@ -61,6 +61,20 @@ def make_board(state: DraftState, proj: pd.DataFrame, cons: pd.DataFrame | None)
     return build_board(proj, starters, state.teams, consistency=cons)
 
 
+def poll_delay(picks_until_turn: int, my_turn: bool) -> float:
+    """Poll faster the closer your pick is.
+
+    Twenty picks away, a couple of seconds of lag costs nothing. On the clock,
+    it is the difference between seeing the pick that just went and reaching for
+    a player who is already gone.
+    """
+    if my_turn or picks_until_turn <= settings.poll_near_threshold:
+        return settings.poll_interval_near_s
+    if picks_until_turn <= settings.poll_near_threshold * 3:
+        return settings.poll_interval_s
+    return settings.poll_interval_far_s
+
+
 # ----------------------------------------------------------------- subcommands
 
 def cmd_find_draft(username: str, season: str) -> int:
@@ -181,11 +195,17 @@ def cmd_live(draft_id: str, slot: int | None, top_n: int) -> int:
                   f"{state.teams} teams x {state.rounds} rounds, {state.scoring}")
 
     stale = False
+    window: list[int] = []
     with Live(console=console, refresh_per_second=4, screen=True) as live:
         while True:
             try:
                 state.ingest(client.picks(draft_id))
-                stale = False
+                # A response the CDN has held longer than a pick clock means we
+                # may be looking at a cached board, not a quiet one.
+                age = client.last_age_s or 0.0
+                stale = age > settings.stale_age_warn_s
+                if stale:
+                    logger.warning("served a %.0fs-old cached response", age)
             except SleeperError as exc:
                 # Never crash out of the loop mid-draft; show the last good board.
                 logger.warning("poll failed: %s", exc)
@@ -197,7 +217,7 @@ def cmd_live(draft_id: str, slot: int | None, top_n: int) -> int:
 
             if state.current_pick_no > state.total_picks:
                 break
-            time.sleep(settings.poll_interval_s)
+            time.sleep(poll_delay(len(window), state.is_my_turn(slot)))
 
     console.print("[green]draft complete.[/]")
     return 0

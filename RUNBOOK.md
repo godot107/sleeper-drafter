@@ -61,9 +61,28 @@ join one mid-stream.
 
 ## When something breaks
 
+### A note on polling
+
+The app polls adaptively: **1s** when your pick is imminent, **2s** in the middle
+distance, **4s** when you are 15+ picks away. Even the fast tier is only 6% of Sleeper's
+documented 1000 calls/min ceiling, and picks are fetched with `If-None-Match`, so a draft
+that has not moved returns `304` with **zero bytes**.
+
+Do not slow this down to 15s. A pick clock is often 30-60 seconds, so a 15s interval can
+leave you looking at a board half a clock out of date — and the picks you most need to see
+are the ones immediately before your turn.
+
+**Watch for this on draft night:** Sleeper serves the picks endpoint with
+`cache-control: s-maxage=300`, meaning Cloudflare may cache it for up to five minutes. If
+the CDN serves an aged response, the app shows the `⚠ STALE` banner (it checks the `Age`
+header, warning past 45s). If that banner sticks while picks are visibly happening in the
+Sleeper app, the edge cache is the cause — report it and fall back to the cheatsheet.
+This is the single most important thing to verify in the mock-draft dry run.
+
 | Symptom | What to do |
 |---|---|
-| `⚠ STALE` banner | An API poll failed; it retries automatically. Keep drafting off the last good board. |
+| `⚠ STALE` banner, briefly | A poll failed or the CDN served an aged response; it retries. Keep drafting off the last good board. |
+| `⚠ STALE` banner that will not clear | Edge cache is serving old picks. Cross-check against the Sleeper app; if it is genuinely behind, use the cheatsheet. |
 | Wrong roster counts | League uses a slot schema we misread. Fall back to the cheatsheet. |
 | Recommendations look absurd at 1.01 | Scoring-format detection is wrong. Check `draft.metadata.scoring_type`. |
 | Total failure | The printed cheatsheet. This is why you print it. |

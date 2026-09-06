@@ -57,7 +57,18 @@ class Settings:
     # api.sleeper.com returns 403 to the default "Python-urllib/3.x" UA, so an
     # explicit User-Agent is mandatory, not cosmetic.
     user_agent: str = "sleeper-drafter/0.1 (+https://github.com/godot107/sleeper-drafter)"
-    poll_interval_s: float = field(default_factory=lambda: _env_float("POLL_INTERVAL_S", 1.5))
+    # Adaptive polling. Sleeper's documented ceiling is 1000 calls/min and
+    # picks are fetched conditionally (304, zero bytes) when nothing has moved,
+    # so even the fast tier is ~60/min of near-empty requests. Polling slowly
+    # is the real risk: a pick clock is often 30-60s, so a 15s interval can
+    # leave you looking at a board that is half a clock out of date.
+    poll_interval_s: float = field(default_factory=lambda: _env_float("POLL_INTERVAL_S", 2.0))
+    poll_interval_near_s: float = 1.0    # your turn is imminent
+    poll_interval_far_s: float = 4.0     # many picks away
+    poll_near_threshold: int = 3         # picks-until-turn considered "near"
+    # The picks endpoint is edge-cached (s-maxage=300). If the CDN keeps
+    # serving us an aged response we are drafting off stale data, so surface it.
+    stale_age_warn_s: float = 45.0
     request_timeout_s: float = field(default_factory=lambda: _env_float("REQUEST_TIMEOUT_S", 10.0))
     max_retries: int = field(default_factory=lambda: _env_int("MAX_RETRIES", 4))
     players_max_age_h: int = 24  # docs: call /players/nfl "not more than once per day"

@@ -54,27 +54,54 @@ class SleeperClient:
         self.session.headers.update(
             {"User-Agent": settings.user_agent, "Accept": "application/json"}
         )
+        # url -> (etag, parsed body), for conditional polling.
+        self._etags: dict[str, tuple[str, Any]] = {}
+        # Age of the most recent response, from the CDN's `age` header. The
+        # picks endpoint is edge-cached (s-maxage=300), so this is how we tell
+        # "no new picks" apart from "we are being served a stale cache".
+        self.last_age_s: float | None = None
 
     # ------------------------------------------------------------------ core
 
-    def _get_json(self, url: str, *, params: dict | None = None) -> Any:
+    def _get_json(
+        self,
+        url: str,
+        *,
+        params: dict | None = None,
+        conditional: bool = False,
+    ) -> Any:
         """GET ``url`` and return parsed JSON, retrying transient failures.
 
         Raises :class:`NotFound` on 404 *and* on a ``null`` body, which Sleeper
         uses for "no such user" while still returning HTTP 200.
+
+        With ``conditional=True`` the request carries ``If-None-Match`` and a
+        304 returns the previously parsed body with no transfer. Sleeper serves
+        ETags on every endpoint, so polling a draft that has not advanced costs
+        zero bytes -- which is what makes a fast poll interval reasonable rather
+        than rude.
         """
         last_exc: Exception | None = None
 
         for attempt in range(settings.max_retries):
+            headers = {}
+            cached = self._etags.get(url) if conditional else None
+            if cached:
+                headers["If-None-Match"] = cached[0]
             try:
                 resp = self.session.get(
-                    url, params=params, timeout=settings.request_timeout_s
+                    url, params=params, headers=headers,
+                    timeout=settings.request_timeout_s,
                 )
             except requests.RequestException as exc:  # network blip, DNS, timeout
                 last_exc = exc
                 logger.warning("request failed (%s), retrying: %s", attempt + 1, exc)
                 self._backoff(attempt)
                 continue
+
+            if resp.status_code == 304 and cached:
+                self._record_age(resp)
+                return cached[1]
 
             if resp.status_code == 404:
                 raise NotFound(f"404 from {url}")
@@ -98,9 +125,20 @@ class SleeperClient:
             if payload is None:
                 raise NotFound(f"empty (null) payload from {url}")
 
+            self._record_age(resp)
+            etag = resp.headers.get("ETag")
+            if conditional and etag:
+                self._etags[url] = (etag, payload)
+
             return payload
 
         raise SleeperError(f"giving up on {url} after {settings.max_retries} attempts") from last_exc
+
+    def _record_age(self, resp: requests.Response) -> None:
+        try:
+            self.last_age_s = float(resp.headers.get("Age", 0) or 0)
+        except (TypeError, ValueError):
+            self.last_age_s = None
 
     @staticmethod
     def _backoff(attempt: int) -> None:
@@ -154,8 +192,11 @@ class SleeperClient:
         return self._get_json(f"{API_V1}/draft/{draft_id}")
 
     def picks(self, draft_id: str) -> list[dict]:
-        """Every pick made so far, oldest first."""
-        return self._get_json(f"{API_V1}/draft/{draft_id}/picks")
+        """Every pick made so far, oldest first.
+
+        Polled conditionally: an unchanged draft returns 304 with no body.
+        """
+        return self._get_json(f"{API_V1}/draft/{draft_id}/picks", conditional=True)
 
     def traded_picks(self, draft_id: str) -> list[dict]:
         """Traded picks, so urgency is attributed to the roster actually picking.
