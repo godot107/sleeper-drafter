@@ -87,7 +87,9 @@ Analytics*](https://isaactpetersen.github.io/Fantasy-Football-Analytics-Textbook
 | **VORP** | Ch. 6 | Measured against "a typical **bench** player at that position" — not the last starter. The median of the bench cohort just past the league-wide starter cutoff. |
 | **Dropoff** | Ch. 6, 7 | Points minus the next-best player at the same position. Measured, replacing an arbitrary points threshold. |
 | **Tiers** | Ch. 21 | Exact Fisher-Jenks natural breaks, chosen over k-means because it has no random initialisation — tiers must not reshuffle between refreshes while you read the board on a clock. |
-| **Uncertainty** | Ch. 6, Eq. 6.1 | CV = s/x̄ over prior-season weekly points. Steady players into starting slots, volatile ones onto the bench where upside is cheap. |
+| **Uncertainty** | Ch. 6, Eq. 6.1 | CV = s/x̄ over prior-season weekly points. Retained, but see the caveat below — it did not survive contact with the data. |
+| **Opportunity** | — | `depth_chart_order` plus projected touches, ranked within position. Correlates **+0.64** with projected points where CV correlates **−0.47**. |
+| **Ceiling** | — | 90th-percentile week from last season, ranked within position. The honest late-round upside measure. |
 | **K/DEF late** | §7.4.1 | Kickers and defenses have the lowest measured dropoff, so waiting costs nothing. |
 | **Runs** | Ch. 7 | "Avoid joining a run mid-stream" — why the denial coefficient stays low. |
 
@@ -111,6 +113,33 @@ Stated plainly, because they affect how much to trust a given number.
 - **Projections are a point estimate of a noisy quantity.** A 12-point VONA edge is inside
   the noise. Treat the tiers and the big cliffs as signal; treat small gaps as ties and
   use your own read.
+- **Survival runs ~5 points optimistic.** Measured by replaying a completed 10-team draft:
+  predicted 91.0% mean survival against 85.8% actual, Brier 0.079. The mid-range is worst
+  — players the model calls 40-60% survived only 19% of the time. That is the independence
+  assumption showing up exactly where predicted. A single-parameter correction would fit
+  the overall mean but overcorrects the low bucket, and one draft is ~15 independent
+  events, so nothing is baked in yet; `--replay` exists to accumulate the evidence.
+- **The `risk` label is weaker than it looks.** CV measures week-to-week bounce, not
+  upside. Prefer `role` (depth chart + volume) for quality and `ceiling` for late-round
+  upside — see below.
+
+### Where the textbook's metric failed
+
+Petersen's uncertainty measure (Ch. 6) is the spread of a player's projections *across
+sources*. We have one source, so week-to-week scoring variance stood in. Tested on 231
+players with 10+ games in 2025, that substitution does not measure what the draft guidance
+is about:
+
+| Tercile | Pts/wk | CV | Ceiling (p90) |
+|---|---|---|---|
+| steady | 9.00 | 0.60 | **15.36** |
+| volatile | 4.09 | 1.09 | **9.37** |
+
+The volatile third has a *lower* ceiling, and `corr(CV, points) = −0.57`. Because CV is
+`sd / mean`, the denominator dominates: it flags low-volume players whose scores bounce
+near zero, not boom-or-bust starters. So `role` and `ceiling` were added to measure
+opportunity and upside directly, and `risk` is kept only as what it actually is —
+week-to-week bounce.
 
 ## Development
 

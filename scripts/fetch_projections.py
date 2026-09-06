@@ -70,6 +70,14 @@ def build(scoring: str, season: str, *, refresh_players: bool = False) -> pd.Dat
                     "pos": meta.get("position") or nested.get("position") or pos,
                     "team": meta.get("team") or nested.get("team") or "FA",
                     "proj_pts": float(pts),
+                    # Opportunity. Sleeper projects no target share, so receptions
+                    # stand in for receiving volume -- an imperfect proxy, since it
+                    # bakes in catch rate and so understates high-target receivers
+                    # in poor offences. Carries need no proxy.
+                    "proj_rec": float(stats.get("rec") or 0.0),
+                    "proj_rush_att": float(stats.get("rush_att") or 0.0),
+                    # Where he sits on his own team's depth chart: 1 = the starter.
+                    "depth_chart_order": meta.get("depth_chart_order"),
                     # 999 is Sleeper's "undrafted" sentinel; keep it as the sentinel
                     # rather than NaN so the ADP kernel stays defined everywhere.
                     "adp": float(stats.get(adp_col) or settings.undrafted_adp),

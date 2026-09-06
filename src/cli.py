@@ -24,6 +24,14 @@ RISK_STYLE = {
     "unknown": "dim",
 }
 
+ROLE_STYLE = {
+    "workhorse": "green",   # his team's starter, top half of positional volume
+    "starter": "cyan",
+    "committee": "white",
+    "backup": "dim",
+    "unknown": "dim",
+}
+
 POS_STYLE = {
     "QB": "magenta", "RB": "green", "WR": "cyan",
     "TE": "yellow", "K": "dim", "DEF": "blue",
@@ -61,7 +69,7 @@ def recommendations_table(ranked: pd.DataFrame, top_n: int = 10) -> Table:
         ("#", "right"), ("Player", "left"), ("Pos", "left"), ("Tm", "left"),
         ("Proj", "right"), ("ADP", "right"), ("Tier", "right"),
         ("Surv%", "right"), ("VORP", "right"), ("VONA", "right"),
-        ("Score", "right"), ("Risk", "left"),
+        ("Score", "right"), ("Role", "left"), ("Risk", "left"),
     ]:
         table.add_column(col, justify=justify, no_wrap=True)
 
@@ -80,6 +88,7 @@ def recommendations_table(ranked: pd.DataFrame, top_n: int = 10) -> Table:
             f"{row['vorp']:.0f}",
             "—" if vona is None or vona != vona else f"{vona:.0f}",
             Text(f"{row['score']:.0f}", style="bold"),
+            Text(str(row.get("role", "")), style=ROLE_STYLE.get(row.get("role"), "")),
             Text(str(row.get("risk", "")), style=RISK_STYLE.get(row.get("risk"), "")),
         )
     return table

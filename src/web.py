@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 POSITIONS = ("QB", "RB", "WR", "TE", "K", "DEF")
 RISKS = ("steady", "neutral", "volatile", "unknown")
+ROLES = ("workhorse", "starter", "committee", "backup", "unknown")
 
 
 @dataclass
@@ -304,6 +305,14 @@ def create_app(publisher: Publisher) -> Dash:
                         value=list(RISKS), inline=True,
                     ),
                 ]),
+                html.Div(style={"minWidth": "250px"}, children=[
+                    html.Label("role (depth chart + volume)"),
+                    dcc.Checklist(
+                        id="f-role",
+                        options=[{"label": f" {r} ", "value": r} for r in ROLES],
+                        value=list(ROLES), inline=True,
+                    ),
+                ]),
                 html.Div(style={"minWidth": "170px"}, children=[
                     html.Label("max tier"),
                     dcc.Slider(id="f-tier", min=1, max=9, step=1, value=9,
@@ -382,13 +391,15 @@ def create_app(publisher: Publisher) -> Dash:
         ]),
     ])
 
-    def _filtered(snap: Snapshot, positions, risks, max_tier, name, only_need):
+    def _filtered(snap: Snapshot, positions, risks, roles, max_tier, name, only_need):
         frame = snap.ranked
         if frame.empty:
             return frame
         mask = frame["pos"].isin(positions or list(POSITIONS))
         if "risk" in frame.columns and risks:
             mask &= frame["risk"].isin(risks)
+        if "role" in frame.columns and roles:
+            mask &= frame["role"].isin(roles)
         if "tier" in frame.columns:
             mask &= frame["tier"] <= (max_tier or 9)
         if name:
@@ -406,11 +417,11 @@ def create_app(publisher: Publisher) -> Dash:
         Output("table", "data"), Output("table", "columns"),
         Output("roster", "children"),
         Input("tick", "n_intervals"), Input("f-pos", "value"),
-        Input("f-risk", "value"), Input("f-tier", "value"),
+        Input("f-risk", "value"), Input("f-role", "value"), Input("f-tier", "value"),
         Input("f-name", "value"), Input("f-only-need", "value"),
         Input("theme", "data"),
     )
-    def refresh(_n, positions, risks, max_tier, name, only_need, theme):
+    def refresh(_n, positions, risks, roles, max_tier, name, only_need, theme):
         snap = publisher.get()
         info = snap.info
         c = palette(theme or "light")
@@ -449,7 +460,7 @@ def create_app(publisher: Publisher) -> Dash:
             ]),
         ]
 
-        view = _filtered(snap, positions, risks, max_tier, name, only_need)
+        view = _filtered(snap, positions, risks, roles, max_tier, name, only_need)
         best = view.iloc[0] if not view.empty else None
         tiles = [
             _tile("on the clock", f"{info['round']}.{info['in_round']:02d}",
@@ -475,6 +486,7 @@ def create_app(publisher: Publisher) -> Dash:
             {"name": "ADP", "id": "adp"}, {"name": "Tier", "id": "tier"},
             {"name": "Surv%", "id": "surv"}, {"name": "VORP", "id": "vorp"},
             {"name": "VONA", "id": "vona"}, {"name": "Score", "id": "score"},
+            {"name": "Role", "id": "role"}, {"name": "Ceil%", "id": "ceil"},
             {"name": "Risk", "id": "risk"},
         ]
         table = view.head(60).copy()
@@ -483,6 +495,9 @@ def create_app(publisher: Publisher) -> Dash:
             for col in ("proj_pts", "vorp", "vona", "score"):
                 table[col] = table[col].round(0)
             table["adp"] = table["adp"].round(1)
+            table["role"] = table.get("role", "")
+            table["ceil"] = (table["ceiling_pct"] * 100).round(0) if "ceiling_pct" in table \
+                else ""
         rows = table[[c["id"] for c in columns]].to_dict("records") if not table.empty else []
 
         roster = html.Table(

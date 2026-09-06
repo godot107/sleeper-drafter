@@ -260,3 +260,57 @@ class TestBenchInference:
         # Round 10 with a bare roster: still far too early to be forced into K/DEF.
         fit = roster_fit(frame, Team(1, 1), schema, round_no=10)
         assert fit.iloc[0] > HARD_BLOCK
+
+
+class TestSharedFlexCapacity:
+    """Flex slots are shared across RB/WR/TE, not per position.
+
+    Found live: with both FLEX slots already filled -- one by a running back,
+    one by a tight end -- the engine still credited a fourth RB and a third TE
+    with a flex bonus, and ranked a pure bench body above a receiver who filled
+    a genuinely empty starting slot.
+    """
+
+    @pytest.fixture
+    def schema(self):
+        return RosterSchema(
+            teams=10, rounds=15,
+            starters={"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 1, "DEF": 1},
+            flex={"FLEX": 2}, bench=5,
+        )
+
+    def test_full_flex_makes_extra_bodies_depth(self, schema):
+        from src.optimizer import slot_a_body_fills
+        # 3 RB (2 start + 1 flex), 2 TE (1 starts + 1 flex), 1 WR -> both flex used
+        team = Team(1, 1, slot_counts={"RB": 3, "TE": 2, "QB": 1, "WR": 1})
+        role = slot_a_body_fills(team, schema)
+        assert role["RB"] == "depth"
+        assert role["TE"] == "depth"
+        assert role["WR"] == "starter"   # WR2 is still open
+        assert role["K"] == "starter"
+        assert role["DEF"] == "starter"
+
+    def test_open_flex_is_still_credited(self, schema):
+        from src.optimizer import slot_a_body_fills
+        team = Team(1, 1, slot_counts={"RB": 2, "WR": 2, "TE": 1, "QB": 1})
+        role = slot_a_body_fills(team, schema)
+        assert role["RB"] == "flex"      # dedicated full, flex open
+        assert role["WR"] == "flex"
+
+    def test_empty_roster_fills_dedicated_first(self, schema):
+        from src.optimizer import slot_a_body_fills
+        role = slot_a_body_fills(Team(1, 1), schema)
+        assert role["RB"] == "starter"
+        assert role["WR"] == "starter"
+
+    def test_bench_body_ranks_below_a_hole_filler(self, schema):
+        """The live regression, as a test."""
+        team = Team(1, 1, slot_counts={"RB": 3, "TE": 2, "QB": 1, "WR": 1})
+        frame = pd.DataFrame([
+            {"player_id": "rb", "name": "DepthRB", "pos": "RB", "team": "X",
+             "proj_pts": 151.0, "adp": 80.0, "vorp": 60.0, "risk": "neutral"},
+            {"player_id": "wr", "name": "StarterWR", "pos": "WR", "team": "X",
+             "proj_pts": 140.0, "adp": 74.0, "vorp": 45.0, "risk": "neutral"},
+        ])
+        fit = roster_fit(frame, team, schema, round_no=8)
+        assert fit.iloc[1] > fit.iloc[0], "the WR filling WR2 must outrank bench depth"

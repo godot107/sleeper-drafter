@@ -269,4 +269,76 @@ def build_board(
     board = add_dropoff(board)
     board = assign_tiers(board)
     board = add_consistency(board, consistency)
+    board = add_opportunity(board)
+    board = add_ceiling(board, consistency)
     return board.sort_values("vorp", ascending=False).reset_index(drop=True)
+
+
+# --------------------------------------------------------------- opportunity
+
+def add_opportunity(frame: pd.DataFrame) -> pd.DataFrame:
+    """Add ``opportunity`` — how much of his position's volume a player commands.
+
+    Grew out of a live draft. The consistency label (CV) turned out to measure
+    the wrong thing: tested against 231 players with 10+ games, CV correlated
+    **−0.57** with points per game and **−0.20** with upside above a player's own
+    average. Because CV is ``sd / mean``, the denominator dominates, so it mostly
+    flags low-volume players whose scores bounce around near zero rather than
+    genuine boom-or-bust starters.
+
+    Volume is what CV was reaching for and missing. Two signals, both already in
+    the projections payload:
+
+    * ``depth_chart_order`` — 1 means he is his own team's starter. Fully
+      populated (96 players at each of orders 1, 2 and 3).
+    * projected touches (``rec + rush_att``), scaled within position.
+
+    Caveat on receptions: Sleeper projects no target share, so receptions stand
+    in. That bakes in catch rate, and therefore understates high-target
+    receivers in poor offences. Targets would be the better stat; they are not
+    on offer.
+    """
+    out = frame.copy()
+    if "proj_rec" not in out.columns:
+        out["opportunity"] = np.nan
+        out["role"] = "unknown"
+        return out
+
+    touches = out["proj_rec"].fillna(0) + out["proj_rush_att"].fillna(0)
+    out["touches"] = touches
+    # Percentile within position, so a tight end is not judged against a back.
+    out["opportunity"] = out.groupby("pos")["touches"].rank(pct=True)
+
+    depth = out.get("depth_chart_order")
+    starter = depth.fillna(9) <= 1 if depth is not None else pd.Series(False, index=out.index)
+    out["role"] = np.where(
+        starter & (out["opportunity"] >= 0.5), "workhorse",
+        np.where(starter, "starter",
+                 np.where(out["opportunity"] >= 0.5, "committee", "backup")),
+    )
+    return out
+
+
+def add_ceiling(frame: pd.DataFrame, consistency: pd.DataFrame | None) -> pd.DataFrame:
+    """Add ``ceiling`` — a player's 90th-percentile week last season.
+
+    The late-round question is not "how steady is he" but "how high can he go".
+    Because a bench player you can drop is effectively a call option — bounded
+    downside, real upside — variance is genuinely worth paying for late. But CV
+    does not find it: the volatile third of the league had a *lower* absolute
+    ceiling (9.4 pts) than the steady third (15.4). Ceiling measures it directly.
+    """
+    out = frame.copy()
+    if consistency is None or consistency.empty or "wk_ceiling" not in consistency.columns:
+        out["ceiling"] = np.nan
+        return out
+    cons = consistency[["player_id", "wk_ceiling"]].copy()
+    cons["player_id"] = cons["player_id"].astype(str)
+    out["player_id"] = out["player_id"].astype(str)
+    out = out.merge(cons, on="player_id", how="left")
+    out["ceiling"] = out["wk_ceiling"]
+    # Raw ceiling is not comparable across positions -- quarterbacks simply
+    # score more, so an unranked list is just a list of quarterbacks. Rank it
+    # within position, the same way opportunity is scaled.
+    out["ceiling_pct"] = out.groupby("pos")["ceiling"].rank(pct=True)
+    return out

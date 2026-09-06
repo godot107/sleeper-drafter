@@ -54,6 +54,58 @@ logger = logging.getLogger(__name__)
 HARD_BLOCK = -1e6
 
 
+FANTASY_POSITIONS = ("QB", "RB", "WR", "TE", "K", "DEF")
+
+
+def slot_a_body_fills(team: Team, schema: RosterSchema) -> dict[str, str]:
+    """Per position: does one more body fill a starting slot, or is it depth?
+
+    Returns ``"starter"`` / ``"flex"`` / ``"depth"`` for each position.
+
+    This must be asked of the *whole* roster rather than per position, because
+    flex slots are shared across RB/WR/TE. The earlier implementation asked each
+    position independently against ``schema.total_starters``, so a roster whose
+    two FLEX slots were already filled -- one by a running back, one by a tight
+    end -- still credited a fourth running back and a third tight end with a
+    flex bonus for slots that no longer existed. Live, that ranked a pure bench
+    body above a player who filled a real hole.
+
+    Answered by asking the lineup solver whether an extra body at that position
+    actually converts into points.
+    """
+    from .rating import best_lineup
+
+    points: dict[str, float] = {}
+    positions: dict[str, str] = {}
+    roster: list[str] = []
+    n = 0
+    for pos, count in team.slot_counts.items():
+        for _ in range(int(count)):
+            pid = f"_{n}"
+            roster.append(pid)
+            points[pid] = 1.0
+            positions[pid] = pos
+            n += 1
+
+    _, holes_before, _ = best_lineup(roster, points, positions, schema)
+
+    result: dict[str, str] = {}
+    for pos in FANTASY_POSITIONS:
+        probe = "_probe"
+        points[probe] = 1.0
+        positions[probe] = pos
+        _, holes_after, _ = best_lineup(roster + [probe], points, positions, schema)
+        points.pop(probe)
+        positions.pop(probe)
+
+        if holes_after < holes_before:
+            dedicated_open = schema.starters.get(pos, 0) - team.slot_counts.get(pos, 0)
+            result[pos] = "starter" if dedicated_open > 0 else "flex"
+        else:
+            result[pos] = "depth"
+    return result
+
+
 def roster_fit(
     board: pd.DataFrame,
     team: Team,
@@ -73,14 +125,17 @@ def roster_fit(
 
     positions = board["pos"].to_numpy()
     owned = np.array([team.slot_counts.get(p, 0) for p in positions], dtype=float)
-    dedicated = np.array([schema.starters.get(p, 0) for p in positions], dtype=float)
     total_start = np.array([schema.total_starters(p) for p in positions], dtype=float)
+
+    # Shared flex capacity, resolved against the whole roster (see docstring).
+    role = slot_a_body_fills(team, schema)
+    roles = np.array([role.get(p, "depth") for p in positions])
 
     fit = np.zeros(len(board), dtype=float)
 
-    fills_starter = owned < dedicated
-    fills_flex = (~fills_starter) & (owned < total_start)
-    is_depth = owned >= total_start
+    fills_starter = roles == "starter"
+    fills_flex = roles == "flex"
+    is_depth = roles == "depth"
 
     fit[fills_starter] = starter_bonus
     fit[fills_flex] = flex_bonus

@@ -82,6 +82,11 @@ def build(season: str, *, weeks: int = REGULAR_SEASON_WEEKS) -> pd.DataFrame:
                 # Petersen Eq. 6.1. Undefined at mean<=0, which happens for
                 # deep bench players who only ever posted zeros.
                 "wk_cv": float(sd / mean) if (sd == sd and mean > 0) else np.nan,
+                # 90th-percentile week: what his ceiling actually looks like.
+                # CV turned out to be a poor upside signal (see valuation.py),
+                # so record the ceiling directly rather than inferring it.
+                "wk_ceiling": float(np.percentile(arr, 90)),
+                "wk_floor": float(np.percentile(arr, 10)),
             }
         )
 
