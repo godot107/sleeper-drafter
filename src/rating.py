@@ -111,6 +111,21 @@ def best_lineup(
             )
             if pick is None:
                 holes += 1
+                # An empty flex is streamed like any other empty slot. Scoring it
+                # at zero -- as this did -- made *filling* one look worth a
+                # player's entire projection, while filling a dedicated slot was
+                # only ever worth his surplus over replacement. The two were on
+                # different scales, and the flex-eligible player always won.
+                #
+                # Live, that put a 173-point tight end above a 190-point running
+                # back, and across a draft the engine asked for a tight end at
+                # four separate picks where one added nothing. The baseline is
+                # the best replacement among the positions eligible for the slot,
+                # since that is who you would actually stream into it.
+                total += max(
+                    (replacement.get(p, 0.0) for p in eligible_positions),
+                    default=0.0,
+                )
                 continue
             value, pos = leftovers.pop(pick)
             total += value

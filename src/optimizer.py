@@ -406,16 +406,25 @@ def positional_outlook(
         survival = group["survival"].to_numpy(dtype=float)
         replacement = float(group["replacement_pts"].iloc[0])
         expected = expected_best_available(points, survival, replacement)
+        cost = float(points[0] - expected[0])
+        survives = float(survival[:depth].mean())
         rows.append({
             "pos": pos,
             "best": group.iloc[0]["name"],
             "best_pts": float(points[0]),
             "expected_next": float(expected[0]),
-            "cost_of_waiting": float(points[0] - expected[0]),
-            "top_survival": float(survival[:depth].mean()),
+            "cost_of_waiting": cost,
+            "top_survival": survives,
+            # What waiting actually costs: the loss only lands if he is gone.
+            # Cost alone ranks quarterbacks and tight ends top because their
+            # cliffs are steep -- but those are exactly the positions that
+            # survive, so the loss rarely comes due. Multiplying by the chance
+            # it does is the honest ordering, and it is what a human ends up
+            # doing in their head anyway.
+            "expected_loss": cost * (1.0 - survives),
             "n_available": int(len(group)),
         })
     frame = pd.DataFrame(rows)
     if frame.empty:
         return frame
-    return frame.sort_values("cost_of_waiting", ascending=False).reset_index(drop=True)
+    return frame.sort_values("expected_loss", ascending=False).reset_index(drop=True)

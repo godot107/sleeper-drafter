@@ -308,8 +308,8 @@ def outlook_table(state, ranked: pd.DataFrame, window: list[int], theme: str):
                           "letterSpacing": ".05em", "padding": "0 0 6px",
                           "borderBottom": f"1px solid {c['border']}"})
         for h, a in (("pos", "left"), ("best available", "left"),
-                     ("cost of waiting", "right"), ("top-3 survival", "right"),
-                     ("", "left"))
+                     ("cost if gone", "right"), ("top-3 survival", "right"),
+                     ("expected", "right"), ("", "left"))
     ])
     rows = []
     for _, r in frame.iterrows():
@@ -324,9 +324,13 @@ def outlook_table(state, ranked: pd.DataFrame, window: list[int], theme: str):
             html.Td(r["pos"], style={"padding": "6px 0", "fontWeight": "600"}),
             html.Td(str(r["best"])[:24], style={"color": c["text_secondary"]}),
             html.Td(f"{r['cost_of_waiting']:+.0f}",
-                    style={"textAlign": "right", "fontVariantNumeric": "tabular-nums"}),
+                    style={"textAlign": "right", "color": c["muted"],
+                           "fontVariantNumeric": "tabular-nums"}),
             html.Td(f"{surv * 100:.0f}%",
-                    style={"textAlign": "right", "color": tone, "fontWeight": "600",
+                    style={"textAlign": "right", "color": tone,
+                           "fontVariantNumeric": "tabular-nums"}),
+            html.Td(f"{r['expected_loss']:.1f}",
+                    style={"textAlign": "right", "fontWeight": "600",
                            "fontVariantNumeric": "tabular-nums"}),
             html.Td(note, style={"color": tone, "paddingLeft": "10px", "fontSize": "12px"}),
         ]))

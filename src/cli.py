@@ -228,12 +228,12 @@ def outlook_panel(state: DraftState, ranked: pd.DataFrame, window: list[int]) ->
         return None
 
     table = Table.grid(padding=(0, 2))
-    for _ in range(5):
+    for _ in range(6):
         table.add_column()
     table.add_row(
         Text("pos", style="dim"), Text("best available", style="dim"),
-        Text("cost of waiting", style="dim"), Text("top-3 survival", style="dim"),
-        Text("", style="dim"),
+        Text("cost if gone", style="dim"), Text("top-3 survival", style="dim"),
+        Text("expected", style="dim"), Text("", style="dim"),
     )
     for _, row in frame.iterrows():
         survival = row["top_survival"]
@@ -243,8 +243,9 @@ def outlook_panel(state: DraftState, ranked: pd.DataFrame, window: list[int]) ->
         table.add_row(
             Text(row["pos"], style=POS_STYLE.get(row["pos"], "")),
             Text(str(row["best"])[:22]),
-            Text(f"{row['cost_of_waiting']:+.0f} pts"),
+            Text(f"{row['cost_of_waiting']:+.0f}", style="dim"),
             Text(f"{survival * 100:.0f}%", style=style),
+            Text(f"{row['expected_loss']:.1f}", style="bold"),
             Text(note, style=style),
         )
     return Panel(table, title=title, border_style="dim", title_align="left")

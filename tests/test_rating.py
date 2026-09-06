@@ -95,6 +95,34 @@ class TestBestLineup:
         assert total == 0.0
         assert holes == 10  # 9 dedicated + 1 flex
 
+    def test_an_empty_flex_is_streamed_not_scored_at_zero(self, schema):
+        """The bug that kept recommending a redundant tight end.
+
+        Scoring an empty flex at zero made *filling* one worth a player's whole
+        projection, while filling a dedicated slot was only worth his surplus
+        over replacement. On those scales a 158-point tight end beat a 190-point
+        running back, and the engine asked for a tight end at four picks in one
+        draft where it added nothing.
+        """
+        roster = ["qb1", "rb1", "rb2", "wr1", "wr2", "te1", "k1", "def1"]
+        replacement = {"RB": 100.0, "WR": 110.0, "TE": 80.0}
+        total, holes, _ = best_lineup(roster, POINTS, POSITIONS, schema, replacement)
+        assert holes == 1                      # the flex is still reported empty
+        # ...but credited at the best replacement among RB/WR/TE, not zero.
+        bare, _, _ = best_lineup(roster, POINTS, POSITIONS, schema)
+        assert total == pytest.approx(bare + 110.0)
+
+    def test_filling_flex_beats_filling_it_with_a_worse_player(self, schema):
+        roster = ["qb1", "rb1", "rb2", "wr1", "wr2", "te1", "k1", "def1"]
+        replacement = {"RB": 100.0, "WR": 110.0, "TE": 80.0}
+        base, _, _ = best_lineup(roster, POINTS, POSITIONS, schema, replacement)
+        better, _, _ = best_lineup(roster + ["rb3"], POINTS, POSITIONS, schema, replacement)
+        worse, _, _ = best_lineup(roster + ["te2"], POINTS, POSITIONS, schema, replacement)
+        # rb3 = 150, te2 = 100 -> the better player must gain more.
+        assert better - base > worse - base
+        # and neither gain may exceed the player's own projection
+        assert better - base <= POINTS["rb3"]
+
 
 class TestGradeCurve:
     def test_monotone(self):
