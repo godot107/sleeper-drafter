@@ -139,6 +139,13 @@ def cmd_mock(slot: int, teams: int, rounds: int, seed: int, step: bool) -> int:
         row = names.loc[pid]
         console.print(f"  R{i:<2} {row['name']:<26} {row['pos']:<4} "
                       f"{row['proj_pts']:6.1f}  tier {int(row['tier'])}  {row['risk']}")
+
+    from src.cli import standings_panel
+
+    panel = standings_panel(state, board, slot)
+    if panel:
+        console.print()
+        console.print(panel)
     return 0
 
 

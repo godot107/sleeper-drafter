@@ -137,6 +137,52 @@ def run_warning(
                  border_style="yellow", title_align="left")
 
 
+GRADE_STYLE = {
+    "A+": "bold green", "A": "bold green", "A-": "green",
+    "B+": "cyan", "B": "cyan", "B-": "cyan",
+    "C+": "yellow", "C": "yellow", "C-": "yellow",
+    "D+": "red", "D": "red", "F": "bold red",
+}
+
+
+def standings_panel(state: DraftState, board: pd.DataFrame, my_slot: int) -> Panel | None:
+    """Live draft grades, so a positional hole is a decision and not a verdict."""
+    from .rating import rate_teams, weakest_positions
+
+    rated = rate_teams(state, board)
+    if rated.empty or rated["picks"].sum() == 0:
+        return None
+
+    my_roster = state.slot_to_roster.get(my_slot, my_slot)
+    table = Table.grid(padding=(0, 2))
+    for _ in range(5):
+        table.add_column()
+
+    for rank, (_, row) in enumerate(rated.iterrows(), 1):
+        mine = row["roster_id"] == my_roster
+        weak = weakest_positions(rated, int(row["roster_id"]))
+        note = ""
+        if row["holes"]:
+            note = f"[red]{int(row['holes'])} unfilled[/]"
+        elif weak:
+            note = f"[dim]thin at {', '.join(weak)}[/]"
+        table.add_row(
+            Text(f"{rank:>2}.", style="bold" if mine else "dim"),
+            Text(f"slot {int(row['draft_slot']):>2}" + ("  ← you" if mine else ""),
+                 style="bold white" if mine else "dim"),
+            Text(f"{row['starters_pts']:>7.0f}", style="bold" if mine else ""),
+            Text(f"{row['grade']:<2}", style=GRADE_STYLE.get(row["grade"], "")),
+            note,
+        )
+
+    my_row = rated[rated["roster_id"] == my_roster]
+    title = "League (projected starting lineup)"
+    if not my_row.empty:
+        rank = int(my_row.index[0]) + 1
+        title += f" — you are {rank} of {len(rated)}, grade {my_row['grade'].iloc[0]}"
+    return Panel(table, title=title, border_style="dim", title_align="left")
+
+
 def recent_picks(state: DraftState, board: pd.DataFrame, n: int = 5) -> Panel:
     names = board.set_index("player_id")
     lines = []
@@ -161,10 +207,15 @@ def dashboard(
     *,
     stale: bool = False,
     top_n: int = 10,
+    show_standings: bool = True,
 ) -> Group:
     parts = [header(state, my_slot, window, stale), recommendations_table(ranked, top_n)]
     warning = run_warning(state, board, window, available=ranked)
     if warning:
         parts.append(warning)
+    if show_standings:
+        standings = standings_panel(state, board, my_slot)
+        if standings:
+            parts.append(standings)
     parts.append(recent_picks(state, board))
     return Group(*parts)
