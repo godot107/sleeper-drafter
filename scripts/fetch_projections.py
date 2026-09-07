@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import settings  # noqa: E402
 from src.sleeper_client import FANTASY_POSITIONS, SleeperClient  # noqa: E402
+from src.state import SCORING_LABELS  # noqa: E402
 
 logger = logging.getLogger("fetch_projections")
 
@@ -84,6 +85,11 @@ def build(scoring: str, season: str, *, refresh_players: bool = False) -> pd.Dat
                     "search_rank": meta.get("search_rank") or 99999,
                     "years_exp": meta.get("years_exp"),
                     "injury_status": meta.get("injury_status"),
+                    # Stamped on every row so the app can refuse to run this
+                    # board against a league it was not built for. A half-PPR
+                    # board in a standard league is wrong in a way that looks
+                    # completely normal.
+                    "scoring": scoring,
                 }
             )
             kept += 1
@@ -116,7 +122,11 @@ def main(argv: list[str] | None = None) -> int:
     frame.to_csv(args.out, index=False)
 
     real_adp = int((frame["adp"] < settings.undrafted_adp).sum())
-    print(f"wrote {args.out}  ({len(frame)} players, {real_adp} with real ADP, scoring={args.scoring})")
+    print(f"wrote {args.out}  ({len(frame)} players, {real_adp} with real ADP, "
+          f"scoring={args.scoring})")
+    print("This board is only valid for a "
+          f"{SCORING_LABELS.get(args.scoring, args.scoring)} league. "
+          "Rebuild with --scoring if yours differs.")
     print(frame.head(12).to_string(index=False))
     return 0
 

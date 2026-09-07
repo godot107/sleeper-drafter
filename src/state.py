@@ -237,6 +237,43 @@ def scoring_format(draft: dict, league: dict | None = None) -> str:
     return "half_ppr" if rec >= 0.25 else "std"
 
 
+SCORING_LABELS = {
+    "ppr": "full PPR (1.0 per reception)",
+    "half_ppr": "half PPR (0.5 per reception)",
+    "std": "standard (no reception points)",
+    "2qb": "superflex / 2QB",
+}
+
+
+def board_scoring(frame: pd.DataFrame) -> str | None:
+    """Which format ``data/projections.csv`` was built for, or ``None``.
+
+    ``scripts/fetch_projections.py`` stamps the format it selected columns for
+    into every row. ``None`` means the snapshot predates the column or is
+    inconsistent -- unknown, which is not the same as wrong.
+    """
+    if frame.empty or "scoring" not in frame.columns:
+        return None
+    values = pd.unique(frame["scoring"].dropna())
+    return str(values[0]) if len(values) == 1 else None
+
+
+def scoring_mismatch(frame: pd.DataFrame, league_scoring: str) -> tuple[str, str] | None:
+    """``(board_format, league_format)`` when the board is for another league.
+
+    This is the one input error that produces a board of entirely plausible
+    numbers. A full-PPR board in a half-PPR league overvalues every receiver by
+    roughly fifty points at the top, and nothing downstream can notice: VORP,
+    tiers, survival and VONA all compute happily on the wrong points. The only
+    place it can be caught is here, by comparing what the file was built for
+    against what the league actually is.
+    """
+    built = board_scoring(frame)
+    if built is None or built == league_scoring:
+        return None
+    return built, league_scoring
+
+
 # ---------------------------------------------------------------- draft state
 
 @dataclass

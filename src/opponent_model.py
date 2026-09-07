@@ -179,7 +179,44 @@ def survival_probabilities(
         team = state.team_at(pick_no)
         probs = selection_probs(board, team, state.schema, pick_no)
         survive *= 1.0 - probs
-    return survive
+    return _calibrate(survive)
+
+
+def _calibrate(survive: np.ndarray) -> np.ndarray:
+    """Correct the independence assumption's optimism, empirically.
+
+    The product above treats intermediate picks as independent. Real drafts are
+    not: managers watch each other, positions run, and a player the model gives
+    a coin-flip chance of lasting does considerably worse than a coin flip.
+
+    Measured over four completed drafts (3,360 predictions in
+    ``data/calibration.csv``), raw survival ran **+6.7 points optimistic** and
+    the error was concentrated exactly where independence is weakest -- the
+    contested middle::
+
+        bucket     n     predicted   actual    p^gamma
+        0-20%     19       0.159      0.053     0.001
+        20-40%    74       0.310      0.081     0.008
+        40-60%   113       0.520      0.142     0.068
+        60-80%   192       0.685      0.318     0.212
+        80-100% 2962       0.994      0.964     0.975
+
+    A single exponent fitted to the overall mean (``gamma = 4.11``) lowers the
+    observation-weighted mean absolute error from 0.066 to 0.021 and improves
+    **every** bucket, which is why one knob is defensible here. With three
+    drafts it was not -- it overshot the middle -- so this waited for evidence.
+
+    Deliberately *not* A/B tested in ``--mock``: mock opponents are sampled
+    from ``selection_probs`` itself, so a mock draft has none of the herding
+    this corrects and would score the correction as a regression. The evidence
+    for it is live drafts, and only live drafts can revise it.
+
+    Set ``settings.survival_gamma = 1.0`` to disable.
+    """
+    gamma = settings.survival_gamma
+    if gamma == 1.0:
+        return survive
+    return np.clip(survive, 0.0, 1.0) ** gamma
 
 
 def sample_pick(

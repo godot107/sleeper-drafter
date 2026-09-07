@@ -8,11 +8,16 @@ The tool is worthless the day after the draft. Work through this in order.
 cd ~/workspace/projects/sleeper-drafter
 source .venv/bin/activate
 
-python scripts/fetch_projections.py       # refresh projections + ADP
+python scripts/fetch_projections.py --scoring half_ppr   # projections + ADP
 python scripts/fetch_consistency.py       # refresh weekly-variance risk labels
 python main.py --find-draft <username>    # note your draft_id and slot
 python main.py --export-cheatsheet        # then PRINT data/cheatsheet.csv
 ```
+
+`--scoring` must match your league: `ppr`, `half_ppr`, `std`, or `2qb` for superflex.
+It is stamped into the board, and the app refuses to start a live draft against a league
+in a different format — but check the header line anyway, it prints
+`scoring: … — board matches league` on startup.
 
 Then **dry-run against a live Sleeper mock draft.** Join one in the app, grab its
 `draft_id` from the URL, and run the real live path:
@@ -84,7 +89,8 @@ This is the single most important thing to verify in the mock-draft dry run.
 | `⚠ STALE` banner, briefly | A poll failed or the CDN served an aged response; it retries. Keep drafting off the last good board. |
 | `⚠ STALE` banner that will not clear | Edge cache is serving old picks. Cross-check against the Sleeper app; if it is genuinely behind, use the cheatsheet. |
 | Wrong roster counts | League uses a slot schema we misread. Fall back to the cheatsheet. |
-| Recommendations look absurd at 1.01 | Scoring-format detection is wrong. Check `draft.metadata.scoring_type`. |
+| `Scoring mismatch` on startup | The board was built for another format. Rebuild with the `--scoring` it names. `--ignore-scoring-mismatch` overrides if you are out of time; WR/TE will be mispriced. |
+| Recommendations look absurd at 1.01 | Scoring-format detection is wrong. Check `draft.metadata.scoring_type` against the startup line. |
 | Total failure | The printed cheatsheet. This is why you print it. |
 
 The loop never crashes out mid-draft by design: a failed poll shows the last known board

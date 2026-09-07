@@ -28,6 +28,7 @@ might be.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 
@@ -128,16 +129,32 @@ def replay(
     }
 
 
+def draft_key(draft_id: str) -> str:
+    """A stable, non-reversible key for a draft.
+
+    The log is committed -- it is the evidence behind ``survival_gamma`` -- but a
+    raw Sleeper ``draft_id`` is a live handle: anyone can resolve it through the
+    public API to the league and every member's display name. Those are other
+    people, and they did not agree to appear in this repository. Hashing keeps
+    the log's only real job (one row per draft, deduplicated on re-replay) while
+    publishing nothing that points back at them.
+    """
+    return hashlib.sha256(str(draft_id).encode()).hexdigest()[:12]
+
+
 def append_log(report: dict, path: Path) -> None:
     """Accumulate one line per replayed draft, so evidence builds up."""
     row = {k: report[k] for k in
-           ("draft_id", "teams", "rounds", "scoring", "my_slot",
+           ("teams", "rounds", "scoring", "my_slot",
             "n_observations", "predicted_mean", "actual_mean", "brier")}
+    row = {"draft": draft_key(report["draft_id"]), **row}
     row["bias"] = report["predicted_mean"] - report["actual_mean"]
     frame = pd.DataFrame([row])
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         prior = pd.read_csv(path)
-        prior = prior[prior["draft_id"].astype(str) != str(row["draft_id"])]
+        key = "draft" if "draft" in prior.columns else "draft_id"
+        prior = prior[prior[key].astype(str) != str(row["draft"])]
+        prior = prior.rename(columns={"draft_id": "draft"})
         frame = pd.concat([prior, frame], ignore_index=True)
     frame.to_csv(path, index=False)

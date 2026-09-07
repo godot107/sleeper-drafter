@@ -81,6 +81,14 @@ class Settings:
     consideration_set: int = 24    # how many players an opponent realistically weighs
     urgency_min: float = 0.10          # floor for any unfilled position
     urgency_filled: float = 0.05       # starters already filled -> bench-only interest
+    # Survival calibration. The product form assumes intermediate picks are
+    # independent; real drafts run, so raw survival is optimistic exactly in
+    # the contested middle. Fitted on four completed drafts
+    # (data/calibration.csv, 3,360 predictions): observation-weighted mean
+    # absolute calibration error 0.066 -> 0.021, improving every bucket.
+    # 1.0 disables. Refit as `--replay` evidence accumulates.
+    survival_gamma: float = field(
+        default_factory=lambda: _env_float("SURVIVAL_GAMMA", 4.11))
 
     # --- Optimizer: roster fit (projected-point units, so they are
     # commensurate with VORP) ---

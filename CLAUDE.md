@@ -13,7 +13,7 @@ headless-browser pick submission, or anything that writes to Sleeper.
 ```bash
 source .venv/bin/activate
 
-python scripts/fetch_projections.py            # build data/projections.csv (real pts + ADP)
+python scripts/fetch_projections.py --scoring half_ppr   # data/projections.csv (pts + ADP)
 python scripts/fetch_consistency.py            # build data/consistency.csv (CV from last season)
 
 python main.py --find-draft <username>         # discover your draft_id and slot
@@ -27,7 +27,7 @@ python main.py --web --mock --slot 12          # browser dashboard, simulated dr
 python main.py --web --draft-id <id> --slot 12 # browser dashboard, live
 # -> http://localhost:8050  (--port to change; --host 0.0.0.0 to reach another device)
 
-pytest -q                                      # 124 tests
+pytest -q                                      # 163 tests
 ```
 
 ## Layout
@@ -47,7 +47,16 @@ pytest -q                                      # 124 tests
 - `src/mock.py` — offline draft simulation.
 - `src/replay.py` — scores survival predictions against a completed draft; appends to a
   calibration log so evidence accumulates across drafts.
-- `scripts/` — the two data builders. Both write frozen CSV snapshots.
+- `scripts/fetch_*.py` — the two data builders. Both write frozen CSV snapshots.
+- `scripts/experiment_*.py` — standalone, re-runnable evidence for two claims in the
+  README and blog: that CV measured the wrong thing, and that "take running backs early"
+  is slot-dependent. Neither touches the network.
+- `blog.md` + `docs/assets/` — the write-up and its figures. Every number in it comes
+  from the scripts above or from `--replay`.
+- `docs/FINDINGS.md` — accumulated measured findings, including two rejected changes
+  recorded so they are not retried. Draft ids in `data/calibration.csv` are hashed
+  (`replay.draft_key`): a raw Sleeper draft id resolves through the public API to every
+  league member's display name, and those are other people.
 - `data/do_not_draft.txt` — personal exclusions, one name per line. **Committed**, unlike
   the rest of `data/`: it is a judgement, not a generated artifact.
 - `data/` — everything else is generated, gitignored and rebuildable.
@@ -65,6 +74,13 @@ pytest -q                                      # 124 tests
   `_get_json` null-validates everything.
 - **`/v1/players/nfl` is 14.65 MB.** Docs say fetch it at most once a day. It is disk-cached
   with a 24h TTL and never polled.
+- **The board is stamped with the scoring format it was built for**, and the app refuses
+  to start a live draft against a league in a different format. This is the only input
+  error that produces entirely plausible wrong numbers — a full-PPR board in a half-PPR
+  league just overvalues every WR/TE by about a round, and VORP, tiers, survival and VONA
+  all compute happily on it. `--ignore-scoring-mismatch` overrides; a guard you cannot
+  override is the wrong thing to meet on a pick clock. `--mock` inherits the board's
+  format so it never lies about what it is simulating.
 - **Roster schema comes from the league's `roster_positions`**, not the draft's `slots_*`.
   There is no `slots_super_flex`, so superflex is invisible from the draft object alone.
 - **Traded picks are fetched and remapped.** Without it, urgency is attributed to the roster
@@ -84,6 +100,11 @@ pytest -q                                      # 124 tests
   to spend the pick.
 - **Do-not-draft list is a hard block, not a filter.** Excluded players stay on the board so
   the picks feed and `--replay` can still name them; someone else drafts them.
+- **Survival is calibrated by `config.survival_gamma` (4.11), fitted on four replayed
+  drafts.** Raw product-form survival is +6.7 pts optimistic because it assumes picks are
+  independent. Never tune this against `--mock`: mock opponents are sampled from
+  `selection_probs`, so a mock contains none of the herding the correction exists for and
+  will score it as a regression. Refit only from `data/calibration.csv`.
 - **Denial stays weak (λ=0.25, window-scoped).** Petersen Ch.7 warns against joining a run
   mid-stream, which aggressive denial encourages.
 - **Recompute budget is 200ms.** Currently 13ms mean / 23ms max.

@@ -49,7 +49,12 @@ from src.config import settings  # noqa: E402
 from src.mock import mock_draft_object, simulate  # noqa: E402
 from src.optimizer import rank_with_lookahead  # noqa: E402
 from src.sleeper_client import NotFound, SleeperClient, SleeperError  # noqa: E402
-from src.state import DraftState  # noqa: E402
+from src.state import (  # noqa: E402
+    SCORING_LABELS,
+    DraftState,
+    board_scoring,
+    scoring_mismatch,
+)
 from src.valuation import build_board  # noqa: E402
 
 logger = logging.getLogger("sleeper-drafter")
@@ -73,6 +78,51 @@ def load_inputs() -> tuple[pd.DataFrame, pd.DataFrame | None]:
         console.print("[yellow]No consistency data — risk labels unavailable.[/] "
                       "Run: python scripts/fetch_consistency.py")
     return proj, cons
+
+
+def enforce_scoring(proj: pd.DataFrame, league_scoring: str, *,
+                    ignore: bool = False, fatal: bool = True) -> bool:
+    """Refuse to draft off a board built for a different scoring format.
+
+    Every other bad input announces itself -- a missing file, a bad draft id, a
+    slot that made no picks. This one does not: the board loads, every number is
+    the right shape, and a full-PPR board simply overvalues receivers by about a
+    round throughout a half-PPR draft. It has happened once already.
+
+    Returns ``False`` only when the caller should stop. ``--ignore-scoring-
+    mismatch`` always lets it through, because a guard you cannot override is
+    the wrong thing to meet ninety seconds into a draft clock.
+    """
+    built = board_scoring(proj)
+    if built is None:
+        console.print(
+            "[yellow]This projections file predates the scoring stamp[/], so it "
+            "cannot be checked against the league. Rebuild it to enable the "
+            f"check: [bold]python scripts/fetch_projections.py --scoring {league_scoring}[/]"
+        )
+        return True
+
+    mismatch = scoring_mismatch(proj, league_scoring)
+    if mismatch is None:
+        console.print(f"[dim]scoring: {SCORING_LABELS.get(built, built)} — "
+                      f"board matches league[/]")
+        return True
+
+    board_fmt, league_fmt = mismatch
+    console.print(
+        f"\n[bold red]Scoring mismatch.[/] The board was built for "
+        f"[bold]{SCORING_LABELS.get(board_fmt, board_fmt)}[/]; this league is "
+        f"[bold]{SCORING_LABELS.get(league_fmt, league_fmt)}[/].\n"
+        f"Every receiver and tight end on it is mispriced. Rebuild:\n\n"
+        f"    [bold]python scripts/fetch_projections.py --scoring {league_fmt}[/]\n"
+    )
+    if ignore:
+        console.print("[yellow]--ignore-scoring-mismatch set; continuing anyway.[/]\n")
+        return True
+    if not fatal:
+        console.print("[yellow]Continuing — replay results will be skewed.[/]\n")
+        return True
+    return False
 
 
 def make_board(state: DraftState, proj: pd.DataFrame, cons: pd.DataFrame | None) -> pd.DataFrame:
@@ -157,7 +207,8 @@ def cmd_find_draft(username: str, season: str) -> int:
 def cmd_export_cheatsheet(out: Path, teams: int, rounds: int) -> int:
     """The fallback that works when nothing else does. Print it before the draft."""
     proj, cons = load_inputs()
-    draft, league = mock_draft_object(teams=teams, rounds=rounds)
+    draft, league = mock_draft_object(teams=teams, rounds=rounds,
+                                      scoring=board_scoring(proj) or "ppr")
     state = DraftState(draft, proj, league=league)
     board = make_board(state, proj, cons)
 
@@ -176,7 +227,8 @@ def cmd_export_cheatsheet(out: Path, teams: int, rounds: int) -> int:
 
 def cmd_mock(slot: int, teams: int, rounds: int, seed: int, step: bool) -> int:
     proj, cons = load_inputs()
-    draft, league = mock_draft_object(teams=teams, rounds=rounds)
+    draft, league = mock_draft_object(teams=teams, rounds=rounds,
+                                      scoring=board_scoring(proj) or "ppr")
     state = DraftState(draft, proj, league=league)
     board = make_board(state, proj, cons)
     rng = np.random.default_rng(seed)
@@ -225,6 +277,9 @@ def cmd_replay(draft_id: str, slot: int | None, log: Path) -> int:
     league = fetch_league(client, draft, quiet=True)
 
     state = DraftState(draft, proj, league=league)
+    # Non-fatal here: replaying a draft from another format is still informative
+    # about pick arithmetic, it just cannot be read as a scoring judgement.
+    enforce_scoring(proj, state.scoring, fatal=False)
     board = make_board(state, proj, cons)
 
     if slot is None:
@@ -288,7 +343,7 @@ def cmd_replay(draft_id: str, slot: int | None, log: Path) -> int:
 
 def cmd_web(draft_id: str | None, slot: int, port: int, host: str,
             mock: bool, teams: int, rounds: int, seed: int,
-            seconds_per_pick: float) -> int:
+            seconds_per_pick: float, ignore_scoring: bool = False) -> int:
     """Serve the browser dashboard. One poller thread, many browser tabs."""
     import threading
 
@@ -299,7 +354,8 @@ def cmd_web(draft_id: str | None, slot: int, port: int, host: str,
     stop = threading.Event()
 
     if mock:
-        draft, league = mock_draft_object(teams=teams, rounds=rounds)
+        draft, league = mock_draft_object(teams=teams, rounds=rounds,
+                                      scoring=board_scoring(proj) or "ppr")
         state = DraftState(draft, proj, league=league)
         board = make_board(state, proj, cons)
         start_mock_poller(publisher, state, board, slot, stop,
@@ -315,6 +371,8 @@ def cmd_web(draft_id: str | None, slot: int, port: int, host: str,
         league = fetch_league(client, draft)
         state = DraftState(draft, proj, league=league,
                            traded_picks=client.traded_picks(draft_id))
+        if not enforce_scoring(proj, state.scoring, ignore=ignore_scoring):
+            return 2
         board = make_board(state, proj, cons)
         start_live_poller(publisher, client, draft_id, state, board, slot, stop)
         console.print(f"[green]watching[/] {draft_id}  "
@@ -333,7 +391,8 @@ def cmd_web(draft_id: str | None, slot: int, port: int, host: str,
     return 0
 
 
-def cmd_live(draft_id: str, slot: int | None, top_n: int) -> int:
+def cmd_live(draft_id: str, slot: int | None, top_n: int,
+             ignore_scoring: bool = False) -> int:
     proj, cons = load_inputs()
     client = SleeperClient()
 
@@ -347,6 +406,8 @@ def cmd_live(draft_id: str, slot: int | None, top_n: int) -> int:
 
     state = DraftState(draft, proj, league=league,
                        traded_picks=client.traded_picks(draft_id))
+    if not enforce_scoring(proj, state.scoring, ignore=ignore_scoring):
+        return 2
     board = make_board(state, proj, cons)
 
     if slot is None:
@@ -444,6 +505,9 @@ def main(argv: list[str] | None = None) -> int:
                       default=settings.data_dir / "calibration.csv", metavar="PATH",
                       help="where --replay accumulates results "
                            "(default: data/calibration.csv)")
+    misc.add_argument("--ignore-scoring-mismatch", action="store_true",
+                      help="draft anyway when the board's scoring format does "
+                           "not match the league's (it will misprice WR/TE)")
     misc.add_argument("-v", "--verbose", action="store_true",
                       help="debug logging")
 
@@ -465,11 +529,12 @@ def main(argv: list[str] | None = None) -> int:
             ap.error("--web needs either --draft-id or --mock")
         return cmd_web(args.draft_id, args.slot or 5, args.port, args.host,
                        args.mock, args.teams, args.rounds, args.seed,
-                       args.seconds_per_pick)
+                       args.seconds_per_pick, args.ignore_scoring_mismatch)
     if args.mock:
         return cmd_mock(args.slot or 5, args.teams, args.rounds, args.seed, args.step)
     if args.draft_id:
-        return cmd_live(args.draft_id, args.slot, args.top)
+        return cmd_live(args.draft_id, args.slot, args.top,
+                        args.ignore_scoring_mismatch)
 
     ap.error("one of --draft-id, --mock, --find-draft, or --export-cheatsheet is required")
 

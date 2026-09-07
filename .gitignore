@@ -18,6 +18,8 @@ data/cache/
 data/projections.csv
 data/consistency.csv
 data/cheatsheet.csv
+data/experiment_cv.csv
+data/experiment_first_two.csv
 
 # --- Local tooling ---
 .claude/settings.local.json
