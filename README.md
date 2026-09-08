@@ -194,3 +194,16 @@ The pick arithmetic, survival normalisation, VONA exclusion, and roster-legality
 invariants are all pinned. Several were written after a bug: the first mock draft
 finished with no quarterback, no kicker and no defense, and nothing in the ranking maths
 was wrong.
+
+## License and attribution
+
+MIT — see [LICENSE](LICENSE).
+
+Not affiliated with, endorsed by, or sponsored by Sleeper. Sleeper is a trademark of its
+owner. This project reads only public, unauthenticated endpoints, sends an identifying
+User-Agent, and honours the documented guidance to fetch `/v1/players/nfl` at most once a
+day (it is disk-cached with a 24h TTL and never polled). It submits nothing.
+
+Methodology follows Isaac T. Petersen, *Fantasy Football Analytics* — the chapter-by-chapter
+mapping is in [blog.md](blog.md). Projections and ADP come from Sleeper; no projection data
+is redistributed in this repository.
