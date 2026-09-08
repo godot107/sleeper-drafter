@@ -1,0 +1,11 @@
+# Bucket-level survival calibration over four completed drafts (3,360 predictions).
+# Source of truth: docs/FINDINGS.md, itself produced by `main.py --replay` against
+# data/calibration.csv. `predicted` is raw product-form survival; `corrected` is
+# predicted ** config.survival_gamma (4.11); `actual` is what really happened.
+# Regenerate the figure with scripts/plot_calibration.py after any refit.
+bucket,n,predicted,actual,corrected
+0-20%,19,0.159,0.053,0.001
+20-40%,74,0.310,0.081,0.008
+40-60%,113,0.520,0.142,0.068
+60-80%,192,0.685,0.318,0.212
+80-100%,2962,0.994,0.964,0.975

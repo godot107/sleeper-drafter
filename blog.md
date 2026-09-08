@@ -205,42 +205,64 @@ The failure is not Petersen's. His metric measures what he says it measures. It
 is a lesson about substituting a proxy into a formula and inheriting its
 authority without inheriting its meaning.
 
-### 2. The survival model is confidently wrong in the middle
+### 2. The survival model was confidently wrong in the middle
 
 `--replay` re-runs a finished draft pick by pick and scores every survival
-prediction against what actually happened. Pooled across three live drafts —
-2,520 predictions:
+prediction against what actually happened. Pooled across four completed drafts —
+3,360 predictions:
 
-![Predicted survival against actual, bucketed](docs/assets/survival-calibration.png)
+![Predicted survival against actual, before and after the correction](docs/assets/survival-calibration.png)
 
-The 80–100% bucket is nearly perfect: 99% predicted, 96% actual. That bucket is
-also 89% of all predictions, which is why the headline Brier score (**0.052–0.070**
-per draft) looks respectable and the overall bias is only **+6.6 points
-optimistic** (94.2% predicted against 87.6% actual).
+Look at the left panel first. The 80–100% bucket is nearly perfect: 99%
+predicted, 96% actual. That bucket is also 88% of all predictions, which is why
+the headline Brier score looks respectable and the overall bias is only **+6.7
+points optimistic**.
 
-The middle is a disaster. Players the model called 40–60% survived **13%** of the
-time. Players it called 60–80% survived **30%**.
+The middle is a disaster. Players the model called 40–60% survived **14%** of the
+time. Players it called 60–80% survived **32%**.
 
 And the direction is exactly what the model's own assumption predicts. Survival
 multiplies per-pick probabilities **as if the picks were independent**. Real
 drafts have *runs* — three receivers in four picks, because managers watch each
 other. Independence is least damaging at the extremes (nobody wants him; everybody
 does) and most damaging in the contested middle, which is precisely where the
-chart falls apart.
+left panel falls apart.
 
-I have not fitted a correction, and the reason is instructive. The obvious one is
-a single exponent — replace *p* with *p^γ*. Solving for the γ that matches the
-overall mean gives **γ ≈ 4**, and applying it lands the middle buckets on the
-*other* side of the truth: the 60–80% bucket goes from 68% predicted to 22%
-against an actual 30%, and 40–60% goes from 51% to 7% against an actual 13%. One
-knob cannot fix a bias whose size depends on where you are in the range, and
-three drafts is roughly forty-five independent turns — nowhere near enough to fit
-something shaped better than that.
+The fix is a single exponent — replace *p* with *p^γ*. An exponent rather than a
+linear shrink because *p^γ* fixes both 0 and 1, and a turn boundary ("the window
+is empty, he is certainly still there") has to stay exactly 1.0.
 
-So the bias is documented instead. `--replay` appends to a calibration log after
-every draft, and the correction waits for evidence. Publishing the
-miscalibration is more useful than papering over it: a number you know is seven
-points optimistic is usable, and one you believe is not.
+**The interesting part is that this was not fittable when I first wrote it up.**
+With three drafts, solving for the γ that matched the overall mean gave γ ≈ 4 and
+threw the middle buckets onto the *other* side of the truth — the 60–80% bucket
+went from 68% predicted to 22% against an actual 30%. I concluded that one knob
+could not fix a bias whose size depends on where you sit in the range, published
+the miscalibration instead, and left it.
+
+That conclusion was drawn from too little data, not from too simple a model. A
+fourth draft — 840 more predictions — changed the answer. At **γ = 4.11** the
+same one-knob correction improves **every bucket**: observation-weighted mean
+absolute calibration error **0.066 → 0.021**, mean bias **+0.066 → +0.005**, mean
+Brier **0.061 → 0.044**. That is the right panel.
+
+Two things I would not have predicted. The correction still *undershoots* the low
+buckets — it just undershoots by much less than the raw form overshot. And it
+slightly **worsens** the one 10-team standard-scoring draft (Brier 0.071 → 0.074)
+while clearly helping the three 12-team half-PPR ones, which suggests γ wants to
+vary with league size. Four drafts is nowhere near enough to fit that, so it
+stays a single number with a caveat attached.
+
+One rule falls out of this that is easy to get backwards: **never tune γ against
+`--mock`.** Mock opponents are sampled from the selection model itself, so a
+simulated draft contains none of the herding the correction exists for and will
+score it as a regression. Live drafts are the only valid evidence, which is why
+`--replay` appends to a committed calibration log after every one.
+
+The lesson survived the fix, and it is not the one I expected to write. Publishing
+the miscalibration was still right — a number you know is seven points optimistic
+is usable, and one you merely believe is not. But "I have not fitted a correction
+and here is why one cannot work" was an overclaim dressed up as rigour. The
+honest version was always "not yet, on this much data."
 
 ### 3. A scoring bug that only a real draft could find
 
@@ -356,14 +378,14 @@ Sleeper on the third.
 
 ## Did it work?
 
-Four live mock drafts, in order:
+Four live drafts, in order — three public mock rooms, then my actual league:
 
 | Draft | League | Finish | Grade | RB points vs league mean |
 |---|---|---|---|---|
 | 1 | 10-team | 1st | A+ | — |
 | 2 | 12-team | 6th | B− | −151 |
 | 3 | 12-team | 4th | B− | −129 |
-| 4 | 12-team, slot 12 | **3rd** | **A** | **−23** |
+| 4 | 12-team, slot 12 — **real league** | **3rd** | **A** | **−23** |
 
 The improvement between draft 3 and draft 4 was not a smarter algorithm. It was
 the flex fix, which stopped the engine from spending premium picks on a second
@@ -394,7 +416,9 @@ genuinely interesting bug came from a real draft with real humans.
 **Publish the miscalibration.** The survival chart is the least flattering thing
 in this repo and the most useful thing in it. Documenting where a model is wrong
 is not an admission that it is broken; it is the difference between a number you
-can reason with and a number you can only believe.
+can reason with and a number you can only believe. And keep publishing it: the
+log I kept because I could not fix the bias is exactly what made a fourth draft
+enough to fix it.
 
 **Look at the chart.** Two visual bugs — a sort order that silently did nothing
 and a label that ran off the frame — survived every test I had and died the
@@ -420,5 +444,5 @@ python scripts/experiment_first_two.py      # the first-two-picks experiment
 python main.py --replay <draft_id>          # survival calibration on a finished draft
 
 python main.py --web --mock --slot 12       # the dashboard, on a simulated draft
-pytest -q                                   # 146 tests
+pytest -q                                   # 163 tests
 ```

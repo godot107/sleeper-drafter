@@ -12,5 +12,8 @@ dash>=2.17              # interactive dashboard; bundles plotly + flask
 # --- Validation ---
 pydantic>=2.7           # validates Sleeper API payloads (shapes are inconsistent — see README)
 
+# --- Figures (optional; only scripts/plot_calibration.py needs it) ---
+kaleido>=1.0             # static PNG export for plotly, so the blog figure regenerates
+
 # --- Dev (optional) ---
 pytest>=8.0             # pick arithmetic + probability invariants

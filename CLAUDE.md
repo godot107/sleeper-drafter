@@ -48,6 +48,9 @@ pytest -q                                      # 163 tests
 - `src/replay.py` — scores survival predictions against a completed draft; appends to a
   calibration log so evidence accumulates across drafts.
 - `scripts/fetch_*.py` — the two data builders. Both write frozen CSV snapshots.
+- `scripts/plot_calibration.py` — renders `docs/assets/survival-calibration.png` from
+  `data/calibration_buckets.csv`. The other figures were made ad hoc, which is how the
+  published one drifted a draft behind the model; this one regenerates.
 - `scripts/experiment_*.py` — standalone, re-runnable evidence for two claims in the
   README and blog: that CV measured the wrong thing, and that "take running backs early"
   is slot-dependent. Neither touches the network.
@@ -59,6 +62,8 @@ pytest -q                                      # 163 tests
   league member's display name, and those are other people.
 - `data/do_not_draft.txt` — personal exclusions, one name per line. **Committed**, unlike
   the rest of `data/`: it is a judgement, not a generated artifact.
+- `data/calibration_buckets.csv` — bucket-level survival evidence behind
+  `survival_gamma` and its figure. **Committed**, same reasoning as the log above.
 - `data/` — everything else is generated, gitignored and rebuildable.
 
 ## Key decisions / constraints
